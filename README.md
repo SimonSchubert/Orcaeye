@@ -8,9 +8,11 @@ recurring agent runs scheduled through your system's own cron.
 
 Works with Claude, Grok and OpenCode, on macOS, Windows and Linux.
 
-| Context | Loops | New loop |
-| --- | --- | --- |
-| ![Context](media/screen_01_context.png) | ![Loops](media/screen_02_loops.png) | ![New loop](media/screen_03_loop_editor.png) |
+![Context](media/screen_01_context.png)
+
+![Loops](media/screen_02_loops.png)
+
+![New loop](media/screen_03_loop_editor.png)
 
 ## Install
 

@@ -256,11 +256,11 @@ object SampleData {
                 ),
                 LoopJob(
                     id = "line:9",
-                    name = "agent1 hourly",
+                    name = "backup hourly",
                     source = LoopSource.External,
                     enabled = true,
                     schedule = CronSchedule.parse("0 * * * *") ?: error("bad fixture expression"),
-                    rawLine = "0 * * * * /opt/homebrew/bin/python3 $HOME/Projects/agent1/main.py",
+                    rawLine = "0 * * * * /opt/homebrew/bin/python3 $HOME/scripts/backup.py",
                 ),
             ),
         )

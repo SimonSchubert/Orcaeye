@@ -135,10 +135,14 @@ class ScreenshotTest {
     }
 
     private companion object {
-        const val SCALE = 2f
+        /**
+         * Below 2x so the PNGs stay small, while the logical window below stays roomy —
+         * that combination is what makes the screenshots read as compact rather than zoomed.
+         */
+        const val SCALE = 1.5f
 
-        /** 1280x800 logical window at [SCALE]. */
-        const val WIDTH = 2560
-        const val HEIGHT = 1600
+        /** 1440x900 logical window at [SCALE]. */
+        const val WIDTH = 2160
+        const val HEIGHT = 1350
     }
 }

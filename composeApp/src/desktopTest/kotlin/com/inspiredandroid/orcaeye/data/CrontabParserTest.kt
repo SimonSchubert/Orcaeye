@@ -22,7 +22,7 @@ class CrontabParserTest {
     private val crontab =
         listOf(
             "0 * * * * source /Users/simon/.zshrc && /opt/homebrew/bin/python3 " +
-                "/Users/simon/Projects/agent1/main.py > /Users/simon/Projects/agent1/main.log 2>&1",
+                "/Users/simon/scripts/backup.py > /Users/simon/scripts/backup.log 2>&1",
             "# Find missing Linux Command Library commands every 8 hours (offset 4h)",
             "0 4,12,20 * * * cd /Users/simon/Projects/LinuxCommandLibrary && $cronPath " +
                 "grok -p \"/find-missing-commands\" $grokFlags " +
@@ -49,7 +49,7 @@ class CrontabParserTest {
         assertEquals(6, snapshot.jobs.size, "every cron line should become a job")
         assertEquals(5, snapshot.scheduled.size, "the five grok lines are adoptable")
         assertEquals(1, snapshot.external.size, "the python line is external")
-        assertTrue(snapshot.external.single().rawLine.contains("main.py"))
+        assertTrue(snapshot.external.single().rawLine.contains("backup.py"))
         assertTrue(snapshot.scheduled.all { it.source == LoopSource.Adopted })
     }
 
