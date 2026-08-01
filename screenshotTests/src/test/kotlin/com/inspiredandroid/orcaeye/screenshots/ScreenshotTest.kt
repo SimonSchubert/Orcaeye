@@ -139,10 +139,10 @@ class ScreenshotTest {
          * Below 2x so the PNGs stay small, while the logical window below stays roomy —
          * that combination is what makes the screenshots read as compact rather than zoomed.
          */
-        const val SCALE = 1.5f
+        const val SCALE = 1f
 
         /** 1440x900 logical window at [SCALE]. */
-        const val WIDTH = 2160
-        const val HEIGHT = 1350
+        const val WIDTH = 800
+        const val HEIGHT = 600
     }
 }

@@ -8,12 +8,6 @@ recurring agent runs scheduled through your system's own cron.
 
 Works with Claude, Grok and OpenCode, on macOS, Windows and Linux.
 
-![Context](media/screen_01_context.png)
-
-![Loops](media/screen_02_loops.png)
-
-![New loop](media/screen_03_loop_editor.png)
-
 ## Install
 
 ```bash
@@ -22,6 +16,12 @@ brew install --cask simonschubert/tap/orcaeye
 
 MSI, deb, rpm and AppImage builds are attached to each
 [release](https://github.com/SimonSchubert/Orcaeye/releases).
+
+![Context](media/screen_01_context.png)
+
+![Loops](media/screen_02_loops.png)
+
+![New loop](media/screen_03_loop_editor.png)
 
 ## Loops
 
