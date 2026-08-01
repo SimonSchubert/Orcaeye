@@ -1,0 +1,940 @@
+package com.inspiredandroid.orcaeye.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.inspiredandroid.orcaeye.model.AgentFileItem
+import com.inspiredandroid.orcaeye.model.AppSection
+import com.inspiredandroid.orcaeye.model.AppSnapshot
+import com.inspiredandroid.orcaeye.model.BrowseSelection
+import com.inspiredandroid.orcaeye.model.CreateKind
+import com.inspiredandroid.orcaeye.model.CreateRequest
+import com.inspiredandroid.orcaeye.model.FilePreview
+import com.inspiredandroid.orcaeye.model.MemoryItem
+import com.inspiredandroid.orcaeye.model.ProjectInventory
+import com.inspiredandroid.orcaeye.model.SkillItem
+import com.inspiredandroid.orcaeye.model.SkillOrigin
+import com.inspiredandroid.orcaeye.model.ToolKind
+import com.inspiredandroid.orcaeye.ui.icons.ToolIcon
+
+@Composable
+fun BrowserScreen(
+    state: InventoryUiState,
+    loopsState: LoopsUiState = LoopsUiState(loading = false),
+    loopsActions: LoopsActions = LoopsActions(),
+    onSelectSection: (AppSection) -> Unit,
+    onRefresh: () -> Unit,
+    onSelectSystem: () -> Unit,
+    onSelectProject: (String) -> Unit,
+    onOpenSkill: (SkillItem) -> Unit,
+    onOpenMemory: (MemoryItem) -> Unit,
+    onOpenFile: (path: String, title: String) -> Unit,
+    onDraftChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onClosePreview: () -> Unit,
+    onShowCreate: (CreateKind, String?, List<ToolKind>) -> Unit,
+    onDismissCreate: () -> Unit,
+    onCreate: (name: String, description: String, tool: ToolKind) -> Unit,
+    onRequestDeleteFromEditor: () -> Unit,
+    onCancelDelete: () -> Unit,
+    onConfirmDelete: () -> Unit,
+    onClearStatus: () -> Unit,
+    onOpenTool: (ToolKind, String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxSize()) {
+        SectionHeader(
+            section = state.section,
+            onSelectSection = onSelectSection,
+        )
+        when (state.section) {
+            AppSection.Context ->
+                ContextBody(
+                    state = state,
+                    onRefresh = onRefresh,
+                    onSelectSystem = onSelectSystem,
+                    onSelectProject = onSelectProject,
+                    onOpenSkill = onOpenSkill,
+                    onOpenMemory = onOpenMemory,
+                    onOpenFile = onOpenFile,
+                    onDraftChange = onDraftChange,
+                    onSave = onSave,
+                    onClosePreview = onClosePreview,
+                    onShowCreate = onShowCreate,
+                    onRequestDeleteFromEditor = onRequestDeleteFromEditor,
+                    onClearStatus = onClearStatus,
+                    onOpenTool = onOpenTool,
+                )
+            AppSection.Loops ->
+                LoopsBody(
+                    state = state,
+                    loopsState = loopsState,
+                    loopsActions = loopsActions,
+                    onDraftChange = onDraftChange,
+                    onSave = onSave,
+                    onClosePreview = onClosePreview,
+                    onRequestDeleteFromEditor = onRequestDeleteFromEditor,
+                )
+        }
+    }
+
+    state.createDialog?.let { req ->
+        CreateDialog(
+            request = req,
+            onDismiss = onDismissCreate,
+            onConfirm = onCreate,
+        )
+    }
+    if (state.deleteConfirmPath != null) {
+        AlertDialog(
+            onDismissRequest = onCancelDelete,
+            title = { Text("Delete?") },
+            text = {
+                Text("Delete \"${state.deleteConfirmTitle}\"? This cannot be undone.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = onConfirmDelete,
+                    modifier = Modifier.hoverHand(),
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = onCancelDelete,
+                    modifier = Modifier.hoverHand(),
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SectionHeader(
+    section: AppSection,
+    onSelectSection: (AppSection) -> Unit,
+) {
+    Row(
+        modifier =
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SectionTab(
+            label = "Context",
+            selected = section == AppSection.Context,
+            onClick = { onSelectSection(AppSection.Context) },
+        )
+        SectionTab(
+            label = "Loops",
+            selected = section == AppSection.Loops,
+            onClick = { onSelectSection(AppSection.Loops) },
+        )
+    }
+}
+
+@Composable
+private fun SectionTab(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val bg =
+        if (selected) {
+            MaterialTheme.colorScheme.onSurface
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        }
+    val fg =
+        if (selected) {
+            MaterialTheme.colorScheme.surface
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        color = fg,
+        modifier =
+        Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .hoverClickable(
+                selected = selected,
+                selectedColor = bg,
+                hoverColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                cornerRadius = 20.dp,
+                onClick = onClick,
+            )
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
+private fun ContextBody(
+    state: InventoryUiState,
+    onRefresh: () -> Unit,
+    onSelectSystem: () -> Unit,
+    onSelectProject: (String) -> Unit,
+    onOpenSkill: (SkillItem) -> Unit,
+    onOpenMemory: (MemoryItem) -> Unit,
+    onOpenFile: (path: String, title: String) -> Unit,
+    onDraftChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onClosePreview: () -> Unit,
+    onShowCreate: (CreateKind, String?, List<ToolKind>) -> Unit,
+    onRequestDeleteFromEditor: () -> Unit,
+    onClearStatus: () -> Unit,
+    onOpenTool: (ToolKind, String?) -> Unit,
+) {
+    when {
+        state.loading && state.snapshot == null -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        }
+        state.error != null && state.snapshot == null -> {
+            Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                Text("Error: ${state.error}", color = MaterialTheme.colorScheme.error)
+            }
+        }
+        else -> {
+            Row(Modifier.fillMaxSize()) {
+                Sidebar(
+                    state = state,
+                    onSelectSystem = onSelectSystem,
+                    onSelectProject = onSelectProject,
+                    modifier =
+                    Modifier
+                        .width(280.dp)
+                        .fillMaxHeight(),
+                )
+                MainPane(
+                    state = state,
+                    onRefresh = onRefresh,
+                    onOpenSkill = onOpenSkill,
+                    onOpenMemory = onOpenMemory,
+                    onOpenFile = onOpenFile,
+                    onShowCreate = onShowCreate,
+                    onClearStatus = onClearStatus,
+                    onOpenTool = onOpenTool,
+                    modifier =
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.background),
+                )
+                if (state.preview != null || state.previewLoading) {
+                    EditorPane(
+                        preview = state.preview,
+                        draft = state.draftContent,
+                        loading = state.previewLoading,
+                        saving = state.saving,
+                        dirty = state.dirty,
+                        onDraftChange = onDraftChange,
+                        onSave = onSave,
+                        onClose = onClosePreview,
+                        onDelete = onRequestDeleteFromEditor,
+                        modifier =
+                        Modifier
+                            .widthIn(min = 360.dp, max = 560.dp)
+                            .weight(1.1f)
+                            .fillMaxHeight(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Loops reuses the Context editor pane on the right so "View log" opens a log file the same
+ * way a skill or memory opens.
+ */
+@Composable
+private fun LoopsBody(
+    state: InventoryUiState,
+    loopsState: LoopsUiState,
+    loopsActions: LoopsActions,
+    onDraftChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onClosePreview: () -> Unit,
+    onRequestDeleteFromEditor: () -> Unit,
+) {
+    Row(Modifier.fillMaxSize()) {
+        LoopsScreen(
+            state = loopsState,
+            projects = state.projects,
+            systemSkills = state.snapshot?.systemSkills.orEmpty(),
+            installedTools = state.installedTools,
+            actions = loopsActions,
+            modifier =
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.background),
+        )
+        if (state.preview != null || state.previewLoading) {
+            EditorPane(
+                preview = state.preview,
+                draft = state.draftContent,
+                loading = state.previewLoading,
+                saving = state.saving,
+                dirty = state.dirty,
+                onDraftChange = onDraftChange,
+                onSave = onSave,
+                onClose = onClosePreview,
+                onDelete = onRequestDeleteFromEditor,
+                modifier =
+                Modifier
+                    .widthIn(min = 360.dp, max = 560.dp)
+                    .weight(1.1f)
+                    .fillMaxHeight(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun Sidebar(
+    state: InventoryUiState,
+    onSelectSystem: () -> Unit,
+    onSelectProject: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+        NavRow(
+            label = "System",
+            selected = state.selection is BrowseSelection.System,
+            subtitle =
+            state.snapshot?.let {
+                "${it.systemSkills.size} skills · ${it.systemMemories.size} memories"
+            },
+            onClick = onSelectSystem,
+        )
+        Text(
+            "Projects",
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 16.dp, bottom = 6.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ScrollableLazyColumn(modifier = Modifier.weight(1f)) {
+            items(state.projects, key = { it.path }) { project ->
+                NavRow(
+                    label = project.name,
+                    selected =
+                    (state.selection as? BrowseSelection.Project)?.path == project.path,
+                    subtitle = null,
+                    onClick = { onSelectProject(project.path) },
+                )
+            }
+        }
+        state.snapshot?.warnings?.takeIf { it.isNotEmpty() }?.let { warnings ->
+            Text(
+                text = "${warnings.size} warning(s)",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(8.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun NavRow(
+    label: String,
+    selected: Boolean,
+    subtitle: String?,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier =
+        Modifier
+            .fillMaxWidth()
+            .hoverClickable(
+                selected = selected,
+                selectedColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                cornerRadius = 0.dp,
+                onClick = onClick,
+            ).padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (subtitle != null) {
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MainPane(
+    state: InventoryUiState,
+    onRefresh: () -> Unit,
+    onOpenSkill: (SkillItem) -> Unit,
+    onOpenMemory: (MemoryItem) -> Unit,
+    onOpenFile: (path: String, title: String) -> Unit,
+    onShowCreate: (CreateKind, String?, List<ToolKind>) -> Unit,
+    onClearStatus: () -> Unit,
+    onOpenTool: (ToolKind, String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val snapshot = state.snapshot
+    if (snapshot == null) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text("No data")
+        }
+        return
+    }
+    when (state.selection) {
+        BrowseSelection.System ->
+            SystemContent(
+                snapshot = snapshot,
+                loading = state.loading,
+                statusMessage = state.statusMessage,
+                onRefresh = onRefresh,
+                onClearStatus = onClearStatus,
+                onOpenSkill = onOpenSkill,
+                onOpenMemory = onOpenMemory,
+                onOpenFile = onOpenFile,
+                onShowCreate = onShowCreate,
+                onOpenTool = onOpenTool,
+                installedTools = state.installedTools,
+                modifier = modifier,
+            )
+        is BrowseSelection.Project -> {
+            val project = state.selectedProject
+            if (project == null) {
+                Box(modifier.padding(16.dp)) { Text("Project not found") }
+            } else {
+                ProjectContent(
+                    project = project,
+                    loading = state.loading,
+                    statusMessage = state.statusMessage,
+                    onRefresh = onRefresh,
+                    onClearStatus = onClearStatus,
+                    onOpenSkill = onOpenSkill,
+                    onOpenMemory = onOpenMemory,
+                    onOpenFile = onOpenFile,
+                    onShowCreate = onShowCreate,
+                    onOpenTool = onOpenTool,
+                    installedTools = state.installedTools,
+                    modifier = modifier,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SystemContent(
+    snapshot: AppSnapshot,
+    loading: Boolean,
+    statusMessage: String?,
+    onRefresh: () -> Unit,
+    onClearStatus: () -> Unit,
+    onOpenSkill: (SkillItem) -> Unit,
+    onOpenMemory: (MemoryItem) -> Unit,
+    onOpenFile: (path: String, title: String) -> Unit,
+    onShowCreate: (CreateKind, String?, List<ToolKind>) -> Unit,
+    onOpenTool: (ToolKind, String?) -> Unit,
+    installedTools: List<ToolKind>,
+    modifier: Modifier = Modifier,
+) {
+    ScrollableLazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            DetailToolbar(
+                title = "System",
+                subtitle = "Skills, memories, and config across installed tools",
+                loading = loading,
+                statusMessage = statusMessage,
+                onRefresh = onRefresh,
+                onClearStatus = onClearStatus,
+            )
+        }
+        ToolKind.entries.forEach { kind ->
+            val install = snapshot.tools.firstOrNull { it.kind == kind }
+            if (install?.installed != true) {
+                item {
+                    SectionCard(
+                        title = kind.displayName,
+                        subtitle = "Not installed",
+                        tool = kind,
+                    ) {
+                        Text("No home directory or binary found.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                return@forEach
+            }
+            val skills = snapshot.systemSkills.filter { it.tool == kind }
+            val memories = snapshot.systemMemories.filter { it.tool == kind }
+            val agents = snapshot.systemAgentFiles.filter { it.tool == kind }
+            val unlinked =
+                if (kind == ToolKind.Grok) {
+                    snapshot.unlinkedMemories.filter { it.tool == kind }
+                } else {
+                    emptyList()
+                }
+            item {
+                SectionCard(
+                    title = kind.displayName,
+                    subtitle = install.homeDir.orEmpty(),
+                    tool = kind,
+                    onTitleClick = { onOpenTool(kind, null) },
+                ) {
+                    SectionHeaderWithAdd(
+                        title = "Skills (${skills.size})",
+                        onAdd = {
+                            onShowCreate(CreateKind.Skill, null, listOf(kind))
+                        },
+                    )
+                    if (skills.isEmpty()) {
+                        EmptyHint("No system skills")
+                    } else {
+                        skills.forEach { skill ->
+                            SkillRow(skill, onOpenSkill)
+                        }
+                    }
+                    SectionHeaderWithAdd(
+                        title = "Memories (${memories.size})",
+                        onAdd = {
+                            onShowCreate(CreateKind.Memory, null, listOf(kind))
+                        },
+                    )
+                    if (memories.isEmpty()) {
+                        EmptyHint("No global memories")
+                    } else {
+                        memories.forEach { mem ->
+                            MemoryRow(mem, onOpenMemory)
+                        }
+                    }
+                    if (unlinked.isNotEmpty()) {
+                        SubHeader("Unlinked project memories (${unlinked.size})")
+                        unlinked.forEach { mem ->
+                            MemoryRow(mem, onOpenMemory)
+                        }
+                    }
+                    SubHeader("Config / agents (${agents.size})")
+                    if (agents.isEmpty()) {
+                        EmptyHint("None")
+                    } else {
+                        agents.forEach { file ->
+                            AgentRow(file, onOpenFile)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProjectContent(
+    project: ProjectInventory,
+    loading: Boolean,
+    statusMessage: String?,
+    onRefresh: () -> Unit,
+    onClearStatus: () -> Unit,
+    onOpenSkill: (SkillItem) -> Unit,
+    onOpenMemory: (MemoryItem) -> Unit,
+    onOpenFile: (path: String, title: String) -> Unit,
+    onShowCreate: (CreateKind, String?, List<ToolKind>) -> Unit,
+    onOpenTool: (ToolKind, String?) -> Unit,
+    installedTools: List<ToolKind>,
+    modifier: Modifier = Modifier,
+) {
+    val toolsForCreate =
+        (project.toolsPresent.toList() + installedTools)
+            .distinct()
+            .sortedBy { it.ordinal }
+            .ifEmpty { ToolKind.entries }
+
+    ScrollableLazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            DetailToolbar(
+                title = project.name,
+                subtitle = project.path,
+                loading = loading,
+                statusMessage = statusMessage,
+                onRefresh = onRefresh,
+                onClearStatus = onClearStatus,
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                project.toolsPresent.sortedBy { it.ordinal }.forEach { kind ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier =
+                        Modifier.hoverClickable(
+                            cornerRadius = 12.dp,
+                            onClick = { onOpenTool(kind, project.path) },
+                        ),
+                    ) {
+                        Text(
+                            kind.displayName,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+        }
+        item {
+            SectionCard(title = "Agent files", subtitle = "${project.agentFiles.size}") {
+                if (project.agentFiles.isEmpty()) {
+                    EmptyHint("No AGENTS.md / CLAUDE.md")
+                } else {
+                    project.agentFiles.forEach { AgentRow(it, onOpenFile) }
+                }
+            }
+        }
+        item {
+            PlainCard {
+                SectionHeaderWithAdd(
+                    title = "Skills (${project.skills.size})",
+                    onAdd = {
+                        onShowCreate(CreateKind.Skill, project.path, toolsForCreate)
+                    },
+                )
+                if (project.skills.isEmpty()) {
+                    EmptyHint("No project skills")
+                } else {
+                    project.skills.forEach { SkillRow(it, onOpenSkill) }
+                }
+            }
+        }
+        item {
+            PlainCard {
+                SectionHeaderWithAdd(
+                    title = "Memories (${project.memories.size})",
+                    onAdd = {
+                        onShowCreate(CreateKind.Memory, project.path, toolsForCreate)
+                    },
+                )
+                if (project.memories.isEmpty()) {
+                    EmptyHint("No project memories found")
+                } else {
+                    project.memories.forEach { MemoryRow(it, onOpenMemory) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SkillRow(
+    skill: SkillItem,
+    onOpen: (SkillItem) -> Unit,
+) {
+    Column(
+        modifier =
+        Modifier
+            .fillMaxWidth()
+            .hoverClickable(onClick = { onOpen(skill) })
+            .padding(vertical = 6.dp, horizontal = 4.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            ToolIcon(tool = skill.tool, size = 14.dp)
+            Text(skill.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            OriginBadge(skill.origin)
+        }
+        skill.description?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            skill.symlinkTarget?.let { "→ $it" } ?: skill.path,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun MemoryRow(
+    memory: MemoryItem,
+    onOpen: (MemoryItem) -> Unit,
+) {
+    Column(
+        modifier =
+        Modifier
+            .fillMaxWidth()
+            .hoverClickable(onClick = { onOpen(memory) })
+            .padding(vertical = 6.dp, horizontal = 4.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            ToolIcon(tool = memory.tool, size = 14.dp)
+            Text(memory.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+        }
+        Text(
+            memory.path,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun AgentRow(
+    file: AgentFileItem,
+    onOpenFile: (path: String, title: String) -> Unit,
+) {
+    Column(
+        modifier =
+        Modifier
+            .fillMaxWidth()
+            .hoverClickable(onClick = { onOpenFile(file.path, file.name) })
+            .padding(vertical = 6.dp, horizontal = 4.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            file.tool?.let { ToolIcon(tool = it, size = 14.dp) }
+            Text(file.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+        }
+        Text(
+            file.path,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun OriginBadge(origin: SkillOrigin) {
+    Badge(
+        when (origin) {
+            SkillOrigin.User -> "user"
+            SkillOrigin.Bundled -> "bundled"
+            SkillOrigin.Project -> "project"
+        },
+    )
+}
+
+@Composable
+private fun EditorPane(
+    preview: FilePreview?,
+    draft: String,
+    loading: Boolean,
+    saving: Boolean,
+    dirty: Boolean,
+    onDraftChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onClose: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainer)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    preview?.title ?: "Editor",
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                preview?.path?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (preview?.readOnly == true) {
+                Text(
+                    "read-only",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            } else {
+                if (preview?.canDelete == true) {
+                    TextButton(
+                        onClick = onDelete,
+                        enabled = !loading && !saving,
+                        modifier = Modifier.hoverHand(),
+                    ) {
+                        Text("Delete")
+                    }
+                }
+                TextButton(
+                    onClick = onSave,
+                    enabled = dirty && !loading && !saving && preview != null,
+                    modifier = Modifier.hoverHand(),
+                ) {
+                    Text(if (saving) "Saving…" else "Save")
+                }
+            }
+            TextButton(
+                onClick = onClose,
+                modifier = Modifier.hoverHand(),
+            ) {
+                Text("Close")
+            }
+        }
+        if (loading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else if (preview != null) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = onDraftChange,
+                readOnly = preview.readOnly,
+                modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(8.dp),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CreateDialog(
+    request: CreateRequest,
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, description: String, tool: ToolKind) -> Unit,
+) {
+    var name by remember(request) { mutableStateOf("") }
+    var description by remember(request) { mutableStateOf("") }
+    var tool by remember(request) {
+        mutableStateOf(request.availableTools.firstOrNull() ?: ToolKind.Grok)
+    }
+    val kindLabel = if (request.kind == CreateKind.Skill) "skill" else "memory"
+    val scopeLabel = if (request.projectPath != null) "project" else "system"
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New $kindLabel ($scopeLabel)") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("CLI tool", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    request.availableTools.forEach { option ->
+                        FilterChip(
+                            selected = tool == option,
+                            onClick = { tool = option },
+                            label = { Text(option.displayName) },
+                            leadingIcon = {
+                                ToolIcon(tool = option, size = 14.dp)
+                            },
+                            modifier = Modifier.hoverHand(),
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (request.kind == CreateKind.Skill) {
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        label = { Text("Description") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(name, description, tool) },
+                enabled = name.isNotBlank(),
+                modifier = Modifier.hoverHand(),
+            ) {
+                Text("Create")
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.hoverHand(),
+            ) {
+                Text("Cancel")
+            }
+        },
+    )
+}

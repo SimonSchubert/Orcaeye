@@ -1,0 +1,276 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  verify:
+    name: Verify version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          CATALOG_VERSION=$(grep -E '^appVersion' gradle/libs.versions.toml | cut -d'"' -f2)
+          if [ "$VERSION" != "$CATALOG_VERSION" ]; then
+            echo "::error::Tag v${VERSION} does not match appVersion=${CATALOG_VERSION} in gradle/libs.versions.toml"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+  dmg:
+    name: Build DMG (${{ matrix.arch }})
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build DMG
+        run: ./gradlew :composeApp:packageDmg
+
+      - name: Rename DMG
+        run: |
+          mv composeApp/build/compose/binaries/main/dmg/*.dmg \
+             Orcaeye-${{ needs.verify.outputs.version }}-macos-${{ matrix.arch }}.dmg
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg-${{ matrix.arch }}
+          path: Orcaeye-${{ needs.verify.outputs.version }}-macos-${{ matrix.arch }}.dmg
+
+  msi:
+    name: Build MSI
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build MSI
+        run: ./gradlew :composeApp:packageMsi
+
+      - name: Rename MSI
+        shell: bash
+        run: |
+          mv composeApp/build/compose/binaries/main/msi/*.msi \
+             Orcaeye-${{ needs.verify.outputs.version }}-windows.msi
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi
+          path: Orcaeye-${{ needs.verify.outputs.version }}-windows.msi
+
+  deb:
+    name: Build DEB
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build DEB
+        run: ./gradlew :composeApp:packageDeb
+
+      - name: Rename DEB
+        run: |
+          mv composeApp/build/compose/binaries/main/deb/*.deb \
+             Orcaeye-${{ needs.verify.outputs.version }}-linux.deb
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb
+          path: Orcaeye-${{ needs.verify.outputs.version }}-linux.deb
+
+  rpm:
+    name: Build RPM
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install RPM tools
+        run: sudo apt-get install -y rpm
+
+      - name: Build RPM
+        run: ./gradlew :composeApp:packageRpm
+
+      - name: Rename RPM
+        run: |
+          mv composeApp/build/compose/binaries/main/rpm/*.rpm \
+             Orcaeye-${{ needs.verify.outputs.version }}-linux.rpm
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-rpm
+          path: Orcaeye-${{ needs.verify.outputs.version }}-linux.rpm
+
+  appimage:
+    name: Build AppImage
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install AppImage tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y file
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+
+      - name: Build application distribution
+        run: ./gradlew :composeApp:createDistributable
+
+      - name: Create AppDir structure
+        run: |
+          mkdir -p AppDir/usr/lib
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/512x512/apps
+
+          cp -r composeApp/build/compose/binaries/main/app/Orcaeye/* AppDir/usr/lib/
+
+          ICON=composeApp/src/commonMain/composeResources/drawable/icon.png
+          cp "$ICON" AppDir/usr/share/icons/hicolor/512x512/apps/orcaeye.png
+          cp "$ICON" AppDir/orcaeye.png
+
+          cat > AppDir/orcaeye.desktop << 'EOF'
+          [Desktop Entry]
+          Name=Orcaeye
+          Comment=Browse agent skills, memories and config
+          Exec=orcaeye
+          Icon=orcaeye
+          Type=Application
+          Categories=Development;Utility;
+          Terminal=false
+          EOF
+          cp AppDir/orcaeye.desktop AppDir/usr/share/applications/
+
+          cat > AppDir/AppRun << 'EOF'
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          export PATH="${HERE}/usr/lib/bin:${PATH}"
+          export LD_LIBRARY_PATH="${HERE}/usr/lib/lib/runtime/lib:${LD_LIBRARY_PATH}"
+          exec "${HERE}/usr/lib/bin/Orcaeye" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+
+      - name: Build AppImage
+        run: |
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage --appimage-extract-and-run AppDir \
+            Orcaeye-${{ needs.verify.outputs.version }}-linux.AppImage
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: Orcaeye-${{ needs.verify.outputs.version }}-linux.AppImage
+
+  release:
+    name: Create GitHub Release
+    needs: [verify, dmg, msi, deb, rpm, appimage]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Extract changelog
+        run: |
+          VERSION="${{ needs.verify.outputs.version }}"
+          if [ -f CHANGELOG.md ]; then
+            sed -n "/^## v${VERSION}/,/^## v/{ /^## v${VERSION}/d; /^## v/d; p; }" CHANGELOG.md > changelog.txt
+          fi
+          if [ ! -s changelog.txt ]; then
+            PREVIOUS_TAG=$(git tag --sort=-creatordate | grep -v "^${GITHUB_REF_NAME}$" | head -n1)
+            if [ -z "$PREVIOUS_TAG" ]; then
+              git log --pretty=format:"- %s" "${GITHUB_REF_NAME}" > changelog.txt
+            else
+              git log --pretty=format:"- %s" "${PREVIOUS_TAG}..${GITHUB_REF_NAME}" --no-merges > changelog.txt
+            fi
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Orcaeye v${{ needs.verify.outputs.version }}
+          body_path: changelog.txt
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/macos-dmg-arm64/Orcaeye-${{ needs.verify.outputs.version }}-macos-arm64.dmg
+            artifacts/macos-dmg-x64/Orcaeye-${{ needs.verify.outputs.version }}-macos-x64.dmg
+            artifacts/windows-msi/Orcaeye-${{ needs.verify.outputs.version }}-windows.msi
+            artifacts/linux-deb/Orcaeye-${{ needs.verify.outputs.version }}-linux.deb
+            artifacts/linux-rpm/Orcaeye-${{ needs.verify.outputs.version }}-linux.rpm
+            artifacts/linux-appimage/Orcaeye-${{ needs.verify.outputs.version }}-linux.AppImage

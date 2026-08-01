@@ -1,0 +1,12 @@
+*.iml
+.gradle
+/.claude
+/local.properties
+/.idea
+.DS_Store
+/build
+/.kotlin
+/composeApp/build
+/screenshotTests/build
+.claude
+__pycache__/
