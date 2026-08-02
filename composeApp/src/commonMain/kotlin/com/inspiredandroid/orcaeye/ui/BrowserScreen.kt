@@ -1,5 +1,6 @@
 package com.inspiredandroid.orcaeye.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -535,19 +536,12 @@ private fun SystemContent(
                     tool = kind,
                     onTitleClick = { onOpenTool(kind, null) },
                 ) {
-                    SectionHeaderWithAdd(
-                        title = "Skills (${skills.size})",
-                        onAdd = {
-                            onShowCreate(CreateKind.Skill, null, listOf(kind))
-                        },
+                    // User/Bundled labels are the skills section chrome; Add sits on the User row.
+                    SkillOriginGroups(
+                        skills = skills,
+                        onOpen = onOpenSkill,
+                        onAddUser = { onShowCreate(CreateKind.Skill, null, listOf(kind)) },
                     )
-                    if (skills.isEmpty()) {
-                        EmptyHint("No system skills")
-                    } else {
-                        skills.forEach { skill ->
-                            SkillRow(skill, onOpenSkill)
-                        }
-                    }
                     SectionHeaderWithAdd(
                         title = "Memories (${memories.size})",
                         onAdd = {
@@ -680,11 +674,55 @@ private fun ProjectContent(
     }
 }
 
+/**
+ * System skills split by origin. Always shows a **User** row (with Add) so tools
+ * that only have user skills (Claude, OpenCode) still get a clear section label.
+ * **Bundled** appears when present (Grok).
+ */
+@Composable
+private fun SkillOriginGroups(
+    skills: List<SkillItem>,
+    onOpen: (SkillItem) -> Unit,
+    onAddUser: () -> Unit,
+) {
+    val user = skills.filter { it.origin == SkillOrigin.User }
+    val bundled = skills.filter { it.origin == SkillOrigin.Bundled }
+    val other = skills.filter { it.origin != SkillOrigin.User && it.origin != SkillOrigin.Bundled }
+
+    SectionHeaderWithAdd(
+        title = "User (${user.size})",
+        onAdd = onAddUser,
+    )
+    if (user.isEmpty() && bundled.isEmpty() && other.isEmpty()) {
+        EmptyHint("No system skills")
+    } else {
+        user.forEach { SkillRow(it, onOpen, muted = false) }
+    }
+    if (bundled.isNotEmpty()) {
+        SubHeader("Bundled (${bundled.size})")
+        bundled.forEach { SkillRow(it, onOpen, muted = true) }
+    }
+    other.forEach { SkillRow(it, onOpen, muted = false) }
+}
+
 @Composable
 private fun SkillRow(
     skill: SkillItem,
     onOpen: (SkillItem) -> Unit,
+    muted: Boolean = skill.origin == SkillOrigin.Bundled,
 ) {
+    val titleColor =
+        if (muted) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        }
+    val secondaryColor =
+        if (muted) {
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
     Column(
         modifier =
         Modifier
@@ -694,14 +732,19 @@ private fun SkillRow(
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             ToolIcon(tool = skill.tool, size = 14.dp)
-            Text(skill.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(
+                skill.name,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (muted) FontWeight.Normal else FontWeight.Medium,
+                color = titleColor,
+            )
             OriginBadge(skill.origin)
         }
         skill.description?.let {
             Text(
                 it,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = secondaryColor,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -709,7 +752,7 @@ private fun SkillRow(
         Text(
             skill.symlinkTarget?.let { "→ $it" } ?: skill.path,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = secondaryColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -770,13 +813,32 @@ private fun AgentRow(
 
 @Composable
 private fun OriginBadge(origin: SkillOrigin) {
-    Badge(
+    val label =
         when (origin) {
             SkillOrigin.User -> "user"
             SkillOrigin.Bundled -> "bundled"
             SkillOrigin.Project -> "project"
-        },
-    )
+        }
+    if (origin == SkillOrigin.Bundled) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = RoundedCornerShape(8.dp),
+            border =
+            BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant,
+            ),
+        ) {
+            Text(
+                label,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+            )
+        }
+    } else {
+        Badge(label)
+    }
 }
 
 @Composable

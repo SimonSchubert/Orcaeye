@@ -44,7 +44,7 @@ class DesktopInventoryRepository(
 
         AppSnapshot(
             tools = tools,
-            systemSkills = systemSkills.sortedBy { it.name.lowercase() },
+            systemSkills = systemSkills.sortedWith(skillDisplayOrder),
             systemMemories = systemMemories.sortedBy { it.title.lowercase() },
             systemAgentFiles = systemAgentFiles.sortedBy { it.name.lowercase() },
             projects = projects.sortedBy { it.name.lowercase() },
@@ -242,12 +242,19 @@ class DesktopInventoryRepository(
             result += listSkillsIn(home.resolve(".claude/skills"), ToolKind.Claude, SkillOrigin.User)
         }
         if (tools.any { it.kind == ToolKind.Grok && it.installed }) {
-            result += listSkillsIn(home.resolve(".grok/skills"), ToolKind.Grok, SkillOrigin.User)
-            result += listSkillsIn(home.resolve(".grok/bundled/skills"), ToolKind.Grok, SkillOrigin.Bundled)
+            val user = listSkillsIn(home.resolve(".grok/skills"), ToolKind.Grok, SkillOrigin.User)
+            val bundled = listSkillsIn(home.resolve(".grok/bundled/skills"), ToolKind.Grok, SkillOrigin.Bundled)
+            // Match Grok: a same-named user skill overrides the bundled copy.
+            val userNames = user.map { it.name.lowercase() }.toSet()
+            result += user
+            result += bundled.filter { it.name.lowercase() !in userNames }
         }
         if (tools.any { it.kind == ToolKind.OpenCode && it.installed }) {
-            result += listSkillsIn(home.resolve(".opencode/skills"), ToolKind.OpenCode, SkillOrigin.User)
-            result += listSkillsIn(home.resolve(".config/opencode/skills"), ToolKind.OpenCode, SkillOrigin.User)
+            val openCode =
+                listSkillsIn(home.resolve(".opencode/skills"), ToolKind.OpenCode, SkillOrigin.User) +
+                    listSkillsIn(home.resolve(".config/opencode/skills"), ToolKind.OpenCode, SkillOrigin.User)
+            // Two roots can both hold user skills; keep first occurrence of each name.
+            result += openCode.distinctBy { it.name.lowercase() }
         }
         return result
     }
@@ -791,7 +798,13 @@ class DesktopInventoryRepository(
                 .filter { entry ->
                     val name = entry.name
                     !name.startsWith(".") && (entry.isDirectory() || entry.isSymbolicLink())
-                }.map { entry ->
+                }.mapNotNull { entry ->
+                    val skillMd =
+                        listOf(
+                            entry.resolve("SKILL.md"),
+                            entry.resolve("skill.md"),
+                        ).firstOrNull { it.exists() && it.isRegularFile() }
+                            ?: return@mapNotNull null
                     val symlinkTarget =
                         try {
                             if (entry.isSymbolicLink()) {
@@ -802,12 +815,7 @@ class DesktopInventoryRepository(
                         } catch (_: Exception) {
                             null
                         }
-                    val skillMd =
-                        listOf(
-                            entry.resolve("SKILL.md"),
-                            entry.resolve("skill.md"),
-                        ).firstOrNull { it.exists() && it.isRegularFile() }
-                    val meta = skillMd?.let { parseSkillFrontmatter(it) } ?: emptyMap()
+                    val meta = parseSkillFrontmatter(skillMd)
                     SkillItem(
                         name = meta["name"] ?: entry.name,
                         path = entry.absolutePathString(),
@@ -815,7 +823,7 @@ class DesktopInventoryRepository(
                         origin = origin,
                         symlinkTarget = symlinkTarget,
                         description = meta["description"],
-                        skillMdPath = skillMd?.absolutePathString(),
+                        skillMdPath = skillMd.absolutePathString(),
                     )
                 }
         } catch (e: Exception) {
@@ -865,5 +873,10 @@ class DesktopInventoryRepository(
     companion object {
         private const val MAX_PREVIEW_BYTES = 512_000L
         private const val MAX_PREVIEW_CHARS = 200_000
+
+        /** User before bundled before project, then name. */
+        private val skillDisplayOrder =
+            compareBy<SkillItem> { it.origin.ordinal }
+                .thenBy { it.name.lowercase() }
     }
 }

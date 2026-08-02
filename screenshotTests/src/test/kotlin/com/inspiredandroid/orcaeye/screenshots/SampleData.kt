@@ -77,6 +77,34 @@ object SampleData {
                 description = "Summarize commits into release notes",
                 dir = "$HOME/.grok/skills",
             ),
+            skill(
+                name = "check-work",
+                tool = ToolKind.Grok,
+                origin = SkillOrigin.User,
+                description = "Verify changes with a review subagent",
+                dir = "$HOME/.grok/skills",
+            ),
+            skill(
+                name = "create-workflow",
+                tool = ToolKind.Grok,
+                origin = SkillOrigin.Bundled,
+                description = "Author a Rhai orchestration workflow",
+                dir = "$HOME/.grok/bundled/skills",
+            ),
+            skill(
+                name = "design",
+                tool = ToolKind.Grok,
+                origin = SkillOrigin.Bundled,
+                description = "Write a design doc with a PR plan",
+                dir = "$HOME/.grok/bundled/skills",
+            ),
+            skill(
+                name = "review",
+                tool = ToolKind.Grok,
+                origin = SkillOrigin.Bundled,
+                description = "Code review uncommitted changes or a PR",
+                dir = "$HOME/.grok/bundled/skills",
+            ),
         )
 
     private val systemMemories =
