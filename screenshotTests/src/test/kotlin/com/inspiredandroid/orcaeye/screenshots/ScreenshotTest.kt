@@ -89,23 +89,6 @@ class ScreenshotTest {
                         BrowserScreen(
                             state = state,
                             loopsState = loopsState,
-                            onSelectSection = {},
-                            onRefresh = {},
-                            onSelectSystem = {},
-                            onSelectProject = {},
-                            onOpenSkill = {},
-                            onOpenMemory = {},
-                            onOpenFile = { _, _ -> },
-                            onDraftChange = {},
-                            onSave = {},
-                            onClosePreview = {},
-                            onShowCreate = { _, _, _ -> },
-                            onDismissCreate = {},
-                            onCreate = { _, _, _ -> },
-                            onRequestDeleteFromEditor = {},
-                            onCancelDelete = {},
-                            onConfirmDelete = {},
-                            onOpenTool = { _, _ -> },
                             modifier = Modifier.fillMaxSize(),
                         )
                     }

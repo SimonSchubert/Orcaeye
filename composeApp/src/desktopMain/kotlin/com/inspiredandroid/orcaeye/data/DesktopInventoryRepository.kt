@@ -33,14 +33,14 @@ class DesktopInventoryRepository(
     override suspend fun loadSnapshot(): AppSnapshot = withContext(Dispatchers.IO) {
         warnings.clear()
         val system = buildSystemSnapshot(includeVersions = true)
-        val discovered = discoverAndScanProjects(fullDetails = true)
-        val linkedProjectPaths = discovered.projects.map { it.path }.toSet()
+        val projects = discoverAndScanProjects(fullDetails = true)
+        val linkedProjectPaths = projects.map { it.path }.toSet()
         val unlinked =
             collectGrokProjectMemories()
                 .filter { it.projectPath == null || it.projectPath !in linkedProjectPaths }
 
         system.copy(
-            projects = discovered.projects.sortedBy { it.name.lowercase() },
+            projects = projects.sortedBy { it.name.lowercase() },
             unlinkedMemories = unlinked.sortedBy { it.title.lowercase() },
             warnings = (system.warnings + warnings).distinct(),
         )
@@ -53,14 +53,14 @@ class DesktopInventoryRepository(
 
     override suspend fun discoverProjects(): DiscoveredProjects = withContext(Dispatchers.IO) {
         warnings.clear()
-        val discovered = discoverAndScanProjects(fullDetails = false)
-        val linkedProjectPaths = discovered.projects.map { it.path }.toSet()
+        val projects = discoverAndScanProjects(fullDetails = false)
+        val linkedProjectPaths = projects.map { it.path }.toSet()
         val unlinked =
             collectGrokProjectMemories()
                 .filter { it.projectPath == null || it.projectPath !in linkedProjectPaths }
                 .sortedBy { it.title.lowercase() }
         DiscoveredProjects(
-            projects = discovered.projects.sortedBy { it.name.lowercase() },
+            projects = projects.sortedBy { it.name.lowercase() },
             unlinkedMemories = unlinked,
             warnings = warnings.toList(),
         )
@@ -390,7 +390,7 @@ class DesktopInventoryRepository(
      * @param fullDetails when true, list skills and attach Claude/Grok memories (slow).
      * When false, only markers + agent file presence (fast sidebar stubs).
      */
-    private fun discoverAndScanProjects(fullDetails: Boolean): ProjectScanResult {
+    private fun discoverAndScanProjects(fullDetails: Boolean): List<ProjectInventory> {
         val fromClaude = discoverFromClaudeJson() + discoverFromClaudeProjectsDirs()
         val fromGrok = discoverFromGrokTrusted() + discoverFromGrokSessions()
         val fromFolder = discoverFromProjectsFolder()
@@ -450,12 +450,8 @@ class DesktopInventoryRepository(
                         (!fullDetails && fromRegistry)
                 }
             }
-        return ProjectScanResult(projects = projects)
+        return projects
     }
-
-    private data class ProjectScanResult(
-        val projects: List<ProjectInventory>,
-    )
 
     private fun normalizeExistingDir(pathStr: String): String? {
         val path = Path.of(pathStr)

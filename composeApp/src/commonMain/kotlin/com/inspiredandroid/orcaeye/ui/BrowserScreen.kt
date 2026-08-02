@@ -55,24 +55,9 @@ import com.inspiredandroid.orcaeye.ui.icons.ToolIcon
 fun BrowserScreen(
     state: InventoryUiState,
     loopsState: LoopsUiState = LoopsUiState(loading = false),
+    contextActions: ContextActions = ContextActions(),
     loopsActions: LoopsActions = LoopsActions(),
-    onSelectSection: (AppSection) -> Unit,
-    onRefresh: () -> Unit,
-    onSelectSystem: () -> Unit,
-    onSelectProject: (String) -> Unit,
-    onOpenSkill: (SkillItem) -> Unit,
-    onOpenMemory: (MemoryItem) -> Unit,
-    onOpenFile: (path: String, title: String) -> Unit,
-    onDraftChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onClosePreview: () -> Unit,
-    onShowCreate: (CreateKind, String?, List<ToolKind>) -> Unit,
-    onDismissCreate: () -> Unit,
-    onCreate: (name: String, description: String, tool: ToolKind) -> Unit,
-    onRequestDeleteFromEditor: () -> Unit,
-    onCancelDelete: () -> Unit,
-    onConfirmDelete: () -> Unit,
-    onOpenTool: (ToolKind, String?) -> Unit,
+    onSelectSection: (AppSection) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -84,28 +69,14 @@ fun BrowserScreen(
             AppSection.Context ->
                 ContextBody(
                     state = state,
-                    onRefresh = onRefresh,
-                    onSelectSystem = onSelectSystem,
-                    onSelectProject = onSelectProject,
-                    onOpenSkill = onOpenSkill,
-                    onOpenMemory = onOpenMemory,
-                    onOpenFile = onOpenFile,
-                    onDraftChange = onDraftChange,
-                    onSave = onSave,
-                    onClosePreview = onClosePreview,
-                    onShowCreate = onShowCreate,
-                    onRequestDeleteFromEditor = onRequestDeleteFromEditor,
-                    onOpenTool = onOpenTool,
+                    actions = contextActions,
                 )
             AppSection.Loops ->
                 LoopsBody(
                     state = state,
                     loopsState = loopsState,
                     loopsActions = loopsActions,
-                    onDraftChange = onDraftChange,
-                    onSave = onSave,
-                    onClosePreview = onClosePreview,
-                    onRequestDeleteFromEditor = onRequestDeleteFromEditor,
+                    contextActions = contextActions,
                 )
         }
     }
@@ -113,20 +84,20 @@ fun BrowserScreen(
     state.createDialog?.let { req ->
         CreateDialog(
             request = req,
-            onDismiss = onDismissCreate,
-            onConfirm = onCreate,
+            onDismiss = contextActions.onDismissCreate,
+            onConfirm = contextActions.onCreate,
         )
     }
     if (state.deleteConfirmPath != null) {
         AlertDialog(
-            onDismissRequest = onCancelDelete,
+            onDismissRequest = contextActions.onCancelDelete,
             title = { Text("Delete?") },
             text = {
                 Text("Delete \"${state.deleteConfirmTitle}\"? This cannot be undone.")
             },
             confirmButton = {
                 TextButton(
-                    onClick = onConfirmDelete,
+                    onClick = contextActions.onConfirmDelete,
                     modifier = Modifier.hoverHand(),
                 ) {
                     Text("Delete", color = MaterialTheme.colorScheme.error)
@@ -134,7 +105,7 @@ fun BrowserScreen(
             },
             dismissButton = {
                 TextButton(
-                    onClick = onCancelDelete,
+                    onClick = contextActions.onCancelDelete,
                     modifier = Modifier.hoverHand(),
                 ) {
                     Text("Cancel")
@@ -211,18 +182,7 @@ private fun SectionTab(
 @Composable
 private fun ContextBody(
     state: InventoryUiState,
-    onRefresh: () -> Unit,
-    onSelectSystem: () -> Unit,
-    onSelectProject: (String) -> Unit,
-    onOpenSkill: (SkillItem) -> Unit,
-    onOpenMemory: (MemoryItem) -> Unit,
-    onOpenFile: (path: String, title: String) -> Unit,
-    onDraftChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onClosePreview: () -> Unit,
-    onShowCreate: (CreateKind, String?, List<ToolKind>) -> Unit,
-    onRequestDeleteFromEditor: () -> Unit,
-    onOpenTool: (ToolKind, String?) -> Unit,
+    actions: ContextActions,
 ) {
     when {
         state.loading && state.snapshot == null -> {
@@ -239,8 +199,7 @@ private fun ContextBody(
             Row(Modifier.fillMaxSize()) {
                 Sidebar(
                     state = state,
-                    onSelectSystem = onSelectSystem,
-                    onSelectProject = onSelectProject,
+                    actions = actions,
                     modifier =
                     Modifier
                         .width(280.dp)
@@ -248,12 +207,7 @@ private fun ContextBody(
                 )
                 MainPane(
                     state = state,
-                    onRefresh = onRefresh,
-                    onOpenSkill = onOpenSkill,
-                    onOpenMemory = onOpenMemory,
-                    onOpenFile = onOpenFile,
-                    onShowCreate = onShowCreate,
-                    onOpenTool = onOpenTool,
+                    actions = actions,
                     modifier =
                     Modifier
                         .weight(1f)
@@ -267,10 +221,7 @@ private fun ContextBody(
                         loading = state.previewLoading,
                         saving = state.saving,
                         dirty = state.dirty,
-                        onDraftChange = onDraftChange,
-                        onSave = onSave,
-                        onClose = onClosePreview,
-                        onDelete = onRequestDeleteFromEditor,
+                        actions = actions,
                         modifier =
                         Modifier
                             .widthIn(min = 360.dp, max = 560.dp)
@@ -292,10 +243,7 @@ private fun LoopsBody(
     state: InventoryUiState,
     loopsState: LoopsUiState,
     loopsActions: LoopsActions,
-    onDraftChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onClosePreview: () -> Unit,
-    onRequestDeleteFromEditor: () -> Unit,
+    contextActions: ContextActions,
 ) {
     Row(Modifier.fillMaxSize()) {
         LoopsScreen(
@@ -317,10 +265,7 @@ private fun LoopsBody(
                 loading = state.previewLoading,
                 saving = state.saving,
                 dirty = state.dirty,
-                onDraftChange = onDraftChange,
-                onSave = onSave,
-                onClose = onClosePreview,
-                onDelete = onRequestDeleteFromEditor,
+                actions = contextActions,
                 modifier =
                 Modifier
                     .widthIn(min = 360.dp, max = 560.dp)
@@ -334,8 +279,7 @@ private fun LoopsBody(
 @Composable
 private fun Sidebar(
     state: InventoryUiState,
-    onSelectSystem: () -> Unit,
-    onSelectProject: (String) -> Unit,
+    actions: ContextActions,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.background(MaterialTheme.colorScheme.surfaceContainerLow)) {
@@ -346,7 +290,7 @@ private fun Sidebar(
             state.snapshot?.let {
                 "${it.systemSkills.size} skills · ${it.systemMemories.size} memories"
             },
-            onClick = onSelectSystem,
+            onClick = actions.onSelectSystem,
         )
         Row(
             modifier =
@@ -386,7 +330,7 @@ private fun Sidebar(
                     selected =
                     (state.selection as? BrowseSelection.Project)?.path == project.path,
                     subtitle = null,
-                    onClick = { onSelectProject(project.path) },
+                    onClick = { actions.onSelectProject(project.path) },
                 )
             }
         }
@@ -441,12 +385,7 @@ private fun NavRow(
 @Composable
 private fun MainPane(
     state: InventoryUiState,
-    onRefresh: () -> Unit,
-    onOpenSkill: (SkillItem) -> Unit,
-    onOpenMemory: (MemoryItem) -> Unit,
-    onOpenFile: (path: String, title: String) -> Unit,
-    onShowCreate: (CreateKind, String?, List<ToolKind>) -> Unit,
-    onOpenTool: (ToolKind, String?) -> Unit,
+    actions: ContextActions,
     modifier: Modifier = Modifier,
 ) {
     val snapshot = state.snapshot
@@ -461,13 +400,7 @@ private fun MainPane(
             SystemContent(
                 snapshot = snapshot,
                 loading = state.loading,
-                onRefresh = onRefresh,
-                onOpenSkill = onOpenSkill,
-                onOpenMemory = onOpenMemory,
-                onOpenFile = onOpenFile,
-                onShowCreate = onShowCreate,
-                onOpenTool = onOpenTool,
-                installedTools = state.installedTools,
+                actions = actions,
                 modifier = modifier,
             )
         is BrowseSelection.Project -> {
@@ -484,12 +417,7 @@ private fun MainPane(
                 ProjectContent(
                     project = project,
                     loading = state.loading || state.projectDetailsLoading || !project.detailsLoaded,
-                    onRefresh = onRefresh,
-                    onOpenSkill = onOpenSkill,
-                    onOpenMemory = onOpenMemory,
-                    onOpenFile = onOpenFile,
-                    onShowCreate = onShowCreate,
-                    onOpenTool = onOpenTool,
+                    actions = actions,
                     installedTools = state.installedTools,
                     modifier = modifier,
                 )
@@ -502,13 +430,7 @@ private fun MainPane(
 private fun SystemContent(
     snapshot: AppSnapshot,
     loading: Boolean,
-    onRefresh: () -> Unit,
-    onOpenSkill: (SkillItem) -> Unit,
-    onOpenMemory: (MemoryItem) -> Unit,
-    onOpenFile: (path: String, title: String) -> Unit,
-    onShowCreate: (CreateKind, String?, List<ToolKind>) -> Unit,
-    onOpenTool: (ToolKind, String?) -> Unit,
-    installedTools: List<ToolKind>,
+    actions: ContextActions,
     modifier: Modifier = Modifier,
 ) {
     ScrollableLazyColumn(
@@ -521,7 +443,7 @@ private fun SystemContent(
                 title = "System",
                 subtitle = "Skills, memories, and config across installed tools",
                 loading = loading,
-                onRefresh = onRefresh,
+                onRefresh = actions.onRefresh,
             )
         }
         ToolKind.entries.forEach { kind ->
@@ -552,31 +474,31 @@ private fun SystemContent(
                     title = kind.displayName,
                     subtitle = install.homeDir.orEmpty(),
                     tool = kind,
-                    onTitleClick = { onOpenTool(kind, null) },
+                    onTitleClick = { actions.onOpenTool(kind, null) },
                 ) {
                     // User/Bundled labels are the skills section chrome; Add sits on the User row.
                     SkillOriginGroups(
                         skills = skills,
-                        onOpen = onOpenSkill,
-                        onAddUser = { onShowCreate(CreateKind.Skill, null, listOf(kind)) },
+                        onOpen = actions.onOpenSkill,
+                        onAddUser = { actions.onShowCreate(CreateKind.Skill, null, listOf(kind)) },
                     )
                     SectionHeaderWithAdd(
                         title = "Memories (${memories.size})",
                         onAdd = {
-                            onShowCreate(CreateKind.Memory, null, listOf(kind))
+                            actions.onShowCreate(CreateKind.Memory, null, listOf(kind))
                         },
                     )
                     if (memories.isEmpty()) {
                         EmptyHint("No global memories")
                     } else {
                         memories.forEach { mem ->
-                            MemoryRow(mem, onOpenMemory)
+                            MemoryRow(mem, actions.onOpenMemory)
                         }
                     }
                     if (unlinked.isNotEmpty()) {
                         SubHeader("Unlinked project memories (${unlinked.size})")
                         unlinked.forEach { mem ->
-                            MemoryRow(mem, onOpenMemory)
+                            MemoryRow(mem, actions.onOpenMemory)
                         }
                     }
                     SubHeader("Config / agents (${agents.size})")
@@ -584,7 +506,7 @@ private fun SystemContent(
                         EmptyHint("None")
                     } else {
                         agents.forEach { file ->
-                            AgentRow(file, onOpenFile)
+                            AgentRow(file, actions.onOpenFile)
                         }
                     }
                 }
@@ -597,12 +519,7 @@ private fun SystemContent(
 private fun ProjectContent(
     project: ProjectInventory,
     loading: Boolean,
-    onRefresh: () -> Unit,
-    onOpenSkill: (SkillItem) -> Unit,
-    onOpenMemory: (MemoryItem) -> Unit,
-    onOpenFile: (path: String, title: String) -> Unit,
-    onShowCreate: (CreateKind, String?, List<ToolKind>) -> Unit,
-    onOpenTool: (ToolKind, String?) -> Unit,
+    actions: ContextActions,
     installedTools: List<ToolKind>,
     modifier: Modifier = Modifier,
 ) {
@@ -622,7 +539,7 @@ private fun ProjectContent(
                 title = project.name,
                 subtitle = project.path,
                 loading = loading,
-                onRefresh = onRefresh,
+                onRefresh = actions.onRefresh,
             )
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -633,7 +550,7 @@ private fun ProjectContent(
                         modifier =
                         Modifier.hoverClickable(
                             cornerRadius = 12.dp,
-                            onClick = { onOpenTool(kind, project.path) },
+                            onClick = { actions.onOpenTool(kind, project.path) },
                         ),
                     ) {
                         Text(
@@ -672,7 +589,7 @@ private fun ProjectContent(
                         if (!project.detailsLoaded) "…" else "No AGENTS.md / CLAUDE.md",
                     )
                 } else {
-                    project.agentFiles.forEach { AgentRow(it, onOpenFile) }
+                    project.agentFiles.forEach { AgentRow(it, actions.onOpenFile) }
                 }
             }
         }
@@ -686,13 +603,13 @@ private fun ProjectContent(
                         "Skills"
                     },
                     onAdd = {
-                        onShowCreate(CreateKind.Skill, project.path, toolsForCreate)
+                        actions.onShowCreate(CreateKind.Skill, project.path, toolsForCreate)
                     },
                 )
                 if (project.skills.isEmpty()) {
                     EmptyHint(if (!project.detailsLoaded) "…" else "No project skills")
                 } else {
-                    project.skills.forEach { SkillRow(it, onOpenSkill) }
+                    project.skills.forEach { SkillRow(it, actions.onOpenSkill) }
                 }
             }
         }
@@ -706,13 +623,13 @@ private fun ProjectContent(
                         "Memories"
                     },
                     onAdd = {
-                        onShowCreate(CreateKind.Memory, project.path, toolsForCreate)
+                        actions.onShowCreate(CreateKind.Memory, project.path, toolsForCreate)
                     },
                 )
                 if (project.memories.isEmpty()) {
                     EmptyHint(if (!project.detailsLoaded) "…" else "No project memories found")
                 } else {
-                    project.memories.forEach { MemoryRow(it, onOpenMemory) }
+                    project.memories.forEach { MemoryRow(it, actions.onOpenMemory) }
                 }
             }
         }
@@ -893,10 +810,7 @@ private fun EditorPane(
     loading: Boolean,
     saving: Boolean,
     dirty: Boolean,
-    onDraftChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onClose: () -> Unit,
-    onDelete: () -> Unit,
+    actions: ContextActions,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.background(MaterialTheme.colorScheme.surfaceContainerLow)) {
@@ -934,7 +848,7 @@ private fun EditorPane(
             } else {
                 if (preview?.canDelete == true) {
                     TextButton(
-                        onClick = onDelete,
+                        onClick = actions.onRequestDeleteFromEditor,
                         enabled = !loading && !saving,
                         modifier = Modifier.hoverHand(),
                     ) {
@@ -942,7 +856,7 @@ private fun EditorPane(
                     }
                 }
                 TextButton(
-                    onClick = onSave,
+                    onClick = actions.onSave,
                     enabled = dirty && !loading && !saving && preview != null,
                     modifier = Modifier.hoverHand(),
                 ) {
@@ -950,7 +864,7 @@ private fun EditorPane(
                 }
             }
             TextButton(
-                onClick = onClose,
+                onClick = actions.onClosePreview,
                 modifier = Modifier.hoverHand(),
             ) {
                 Text("Close")
@@ -963,7 +877,7 @@ private fun EditorPane(
         } else if (preview != null) {
             OutlinedTextField(
                 value = draft,
-                onValueChange = onDraftChange,
+                onValueChange = actions.onDraftChange,
                 readOnly = preview.readOnly,
                 modifier =
                 Modifier

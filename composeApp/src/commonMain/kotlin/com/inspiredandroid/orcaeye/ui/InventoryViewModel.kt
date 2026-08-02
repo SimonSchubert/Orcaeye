@@ -59,6 +59,30 @@ data class InventoryUiState(
                 .ifEmpty { ToolKind.entries }
 }
 
+/**
+ * Context (inventory) screen callbacks, bundled so [BrowserScreen] takes one parameter
+ * instead of a dozen — same pattern as [LoopsActions]. Defaults are no-ops so previews
+ * and screenshot tests can pass an empty instance.
+ */
+class ContextActions(
+    val onRefresh: () -> Unit = {},
+    val onSelectSystem: () -> Unit = {},
+    val onSelectProject: (String) -> Unit = {},
+    val onOpenSkill: (SkillItem) -> Unit = {},
+    val onOpenMemory: (MemoryItem) -> Unit = {},
+    val onOpenFile: (path: String, title: String) -> Unit = { _, _ -> },
+    val onDraftChange: (String) -> Unit = {},
+    val onSave: () -> Unit = {},
+    val onClosePreview: () -> Unit = {},
+    val onShowCreate: (CreateKind, String?, List<ToolKind>) -> Unit = { _, _, _ -> },
+    val onDismissCreate: () -> Unit = {},
+    val onCreate: (name: String, description: String, tool: ToolKind) -> Unit = { _, _, _ -> },
+    val onRequestDeleteFromEditor: () -> Unit = {},
+    val onCancelDelete: () -> Unit = {},
+    val onConfirmDelete: () -> Unit = {},
+    val onOpenTool: (ToolKind, String?) -> Unit = { _, _ -> },
+)
+
 class InventoryViewModel(
     private val repository: InventoryRepository,
 ) : ViewModel() {

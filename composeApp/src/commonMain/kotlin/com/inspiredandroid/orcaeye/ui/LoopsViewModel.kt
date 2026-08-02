@@ -56,8 +56,9 @@ data class LoopEditorState(
 }
 
 /**
- * The Loops screen's callbacks, bundled so [BrowserScreen] takes one parameter instead of a
- * dozen. Defaults are no-ops so previews and screenshot tests can pass an empty instance.
+ * Loops screen callbacks, bundled like [ContextActions] so [BrowserScreen] takes one
+ * parameter instead of a dozen. Defaults are no-ops so previews and screenshot tests can
+ * pass an empty instance.
  */
 class LoopsActions(
     val onRefresh: () -> Unit = {},

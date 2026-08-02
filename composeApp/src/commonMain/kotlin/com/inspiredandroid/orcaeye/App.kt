@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import com.inspiredandroid.orcaeye.data.CrontabRepository
 import com.inspiredandroid.orcaeye.data.InventoryRepository
 import com.inspiredandroid.orcaeye.ui.BrowserScreen
+import com.inspiredandroid.orcaeye.ui.ContextActions
 import com.inspiredandroid.orcaeye.ui.InventoryViewModel
 import com.inspiredandroid.orcaeye.ui.LoopsActions
 import com.inspiredandroid.orcaeye.ui.LoopsViewModel
@@ -25,6 +26,28 @@ fun App(
     val loopsViewModel = remember(crontabRepository) { LoopsViewModel(crontabRepository) }
     val state by viewModel.state.collectAsState()
     val loopsState by loopsViewModel.state.collectAsState()
+
+    val contextActions =
+        remember(viewModel) {
+            ContextActions(
+                onRefresh = viewModel::refresh,
+                onSelectSystem = viewModel::selectSystem,
+                onSelectProject = viewModel::selectProject,
+                onOpenSkill = viewModel::openSkill,
+                onOpenMemory = viewModel::openMemory,
+                onOpenFile = { path, title -> viewModel.openFile(path, title) },
+                onDraftChange = viewModel::updateDraft,
+                onSave = viewModel::saveDraft,
+                onClosePreview = viewModel::closePreview,
+                onShowCreate = viewModel::showCreate,
+                onDismissCreate = viewModel::dismissCreate,
+                onCreate = viewModel::create,
+                onRequestDeleteFromEditor = viewModel::requestDeleteFromEditor,
+                onCancelDelete = viewModel::cancelDelete,
+                onConfirmDelete = viewModel::confirmDelete,
+                onOpenTool = viewModel::openTool,
+            )
+        }
 
     val loopsActions =
         remember(loopsViewModel, viewModel) {
@@ -63,24 +86,9 @@ fun App(
             BrowserScreen(
                 state = state,
                 loopsState = loopsState,
+                contextActions = contextActions,
                 loopsActions = loopsActions,
                 onSelectSection = viewModel::selectSection,
-                onRefresh = viewModel::refresh,
-                onSelectSystem = viewModel::selectSystem,
-                onSelectProject = viewModel::selectProject,
-                onOpenSkill = viewModel::openSkill,
-                onOpenMemory = viewModel::openMemory,
-                onOpenFile = { path, title -> viewModel.openFile(path, title) },
-                onDraftChange = viewModel::updateDraft,
-                onSave = viewModel::saveDraft,
-                onClosePreview = viewModel::closePreview,
-                onShowCreate = viewModel::showCreate,
-                onDismissCreate = viewModel::dismissCreate,
-                onCreate = viewModel::create,
-                onRequestDeleteFromEditor = viewModel::requestDeleteFromEditor,
-                onCancelDelete = viewModel::cancelDelete,
-                onConfirmDelete = viewModel::confirmDelete,
-                onOpenTool = viewModel::openTool,
                 modifier = Modifier.fillMaxSize(),
             )
         }
