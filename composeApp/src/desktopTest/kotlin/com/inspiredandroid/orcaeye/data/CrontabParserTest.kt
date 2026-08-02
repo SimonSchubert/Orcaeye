@@ -1,6 +1,7 @@
 package com.inspiredandroid.orcaeye.data
 
 import com.inspiredandroid.orcaeye.model.CronSchedule
+import com.inspiredandroid.orcaeye.model.LoopJob
 import com.inspiredandroid.orcaeye.model.LoopSource
 import com.inspiredandroid.orcaeye.model.SchedulePreset
 import com.inspiredandroid.orcaeye.model.ToolKind
@@ -259,5 +260,66 @@ class CrontabParserTest {
 
         assertEquals(ToolKind.OpenCode, jobs[1].tool)
         assertEquals("summarise the diff", jobs[1].prompt)
+    }
+
+    @Test
+    fun parsesCodexCursorAndGeminiInvocations() {
+        val lines =
+            listOf(
+                "0 9 * * * cd /tmp && codex exec --sandbox workspace-write '/review'",
+                "0 10 * * * cd /tmp && cursor-agent -p 'fix tests' --force",
+                "0 11 * * * cd /tmp && gemini -p 'summarise' --yolo >> /tmp/g.log 2>&1",
+            )
+        val jobs = CrontabParser.parse(lines).jobs
+
+        assertEquals(ToolKind.Codex, jobs[0].tool)
+        assertEquals("/review", jobs[0].prompt)
+        assertEquals("--sandbox workspace-write", jobs[0].extraFlags)
+
+        assertEquals(ToolKind.Cursor, jobs[1].tool)
+        assertEquals("fix tests", jobs[1].prompt)
+        assertEquals("--force", jobs[1].extraFlags)
+
+        assertEquals(ToolKind.Gemini, jobs[2].tool)
+        assertEquals("summarise", jobs[2].prompt)
+        assertEquals("--yolo", jobs[2].extraFlags)
+        assertEquals("/tmp/g.log", jobs[2].logPath)
+    }
+
+    @Test
+    fun parsesCodexWithFlagsAfterPrompt() {
+        val lines = listOf("0 9 * * * codex exec '/review' --sandbox workspace-write")
+        val job = CrontabParser.parse(lines).jobs.single()
+        assertEquals(ToolKind.Codex, job.tool)
+        assertEquals("/review", job.prompt)
+        assertEquals("--sandbox workspace-write", job.extraFlags)
+    }
+
+    @Test
+    fun rendersTier1ToolsWithPromptModesAndDefaultFlags() {
+        assertEquals("exec", CrontabParser.promptMode(ToolKind.Codex))
+        assertEquals("-p", CrontabParser.promptMode(ToolKind.Cursor))
+        assertEquals("-p", CrontabParser.promptMode(ToolKind.Gemini))
+        assertEquals("codex", CrontabParser.binaryName(ToolKind.Codex))
+        assertEquals("cursor-agent", CrontabParser.binaryName(ToolKind.Cursor))
+        assertEquals("gemini", CrontabParser.binaryName(ToolKind.Gemini))
+        assertEquals("--sandbox workspace-write", CrontabParser.defaultFlags(ToolKind.Codex))
+        assertEquals("--force", CrontabParser.defaultFlags(ToolKind.Cursor))
+        assertEquals("--yolo", CrontabParser.defaultFlags(ToolKind.Gemini))
+
+        val codexJob =
+            LoopJob(
+                id = "c1",
+                name = "review",
+                source = LoopSource.Managed,
+                enabled = true,
+                schedule = CronSchedule.parse("0 9 * * *")!!,
+                tool = ToolKind.Codex,
+                workingDirectory = "/tmp",
+                prompt = "/review",
+                extraFlags = CrontabParser.defaultFlags(ToolKind.Codex),
+            )
+        val cmd = CrontabParser.buildCommand(codexJob, includeRedirect = false)
+        assertEquals("cd '/tmp' && codex exec --sandbox workspace-write '/review'", cmd)
     }
 }

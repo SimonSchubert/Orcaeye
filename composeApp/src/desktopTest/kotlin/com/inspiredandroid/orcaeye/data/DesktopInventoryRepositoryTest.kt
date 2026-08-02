@@ -15,9 +15,12 @@ class DesktopInventoryRepositoryTest {
         val snapshot = DesktopInventoryRepository().loadSnapshot()
 
         val byKind = snapshot.tools.associateBy { it.kind }
+        assertEquals(ToolKind.entries.toSet(), byKind.keys, "all ToolKinds should be reported")
         assertTrue(byKind[ToolKind.Claude]?.installed == true, "Claude should be installed")
         assertTrue(byKind[ToolKind.Grok]?.installed == true, "Grok should be installed")
         assertTrue(byKind[ToolKind.OpenCode]?.installed == true, "OpenCode should be installed")
+        // Cursor home (~/.cursor) exists on this machine even without cursor-agent on PATH.
+        assertTrue(byKind[ToolKind.Cursor]?.installed == true, "Cursor should be detected via ~/.cursor")
 
         assertTrue(snapshot.systemSkills.isNotEmpty(), "expected system skills")
         assertTrue(

@@ -6,7 +6,8 @@ Desktop app to manage the skills and memories your agent CLIs use — system-wid
 and per project, alongside their agent files and config — and to set up **Loops**:
 recurring agent runs scheduled through your system's own cron.
 
-Works with Claude, Grok and OpenCode, on macOS, Windows and Linux.
+Works with Claude, Grok, OpenCode, Codex, Cursor and Gemini CLI, on macOS,
+Windows and Linux.
 
 ## Install
 

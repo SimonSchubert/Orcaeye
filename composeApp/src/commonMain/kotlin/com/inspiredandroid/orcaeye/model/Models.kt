@@ -4,6 +4,9 @@ enum class ToolKind {
     Claude,
     Grok,
     OpenCode,
+    Codex,
+    Cursor,
+    Gemini,
     ;
 
     val displayName: String
@@ -12,6 +15,9 @@ enum class ToolKind {
                 Claude -> "Claude"
                 Grok -> "Grok"
                 OpenCode -> "OpenCode"
+                Codex -> "Codex"
+                Cursor -> "Cursor"
+                Gemini -> "Gemini"
             }
 }
 

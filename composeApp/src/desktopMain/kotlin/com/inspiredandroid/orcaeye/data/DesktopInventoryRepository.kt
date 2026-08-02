@@ -230,6 +230,9 @@ class DesktopInventoryRepository(
                     ToolKind.Claude -> project.resolve(".claude/skills")
                     ToolKind.Grok -> project.resolve(".grok/skills")
                     ToolKind.OpenCode -> project.resolve(".opencode/skills")
+                    ToolKind.Codex -> project.resolve(".agents/skills")
+                    ToolKind.Cursor -> project.resolve(".cursor/skills")
+                    ToolKind.Gemini -> project.resolve(".gemini/skills")
                 }
             return dir
         }
@@ -237,6 +240,9 @@ class DesktopInventoryRepository(
             ToolKind.Claude -> home.resolve(".claude/skills")
             ToolKind.Grok -> home.resolve(".grok/skills")
             ToolKind.OpenCode -> home.resolve(".opencode/skills")
+            ToolKind.Codex -> home.resolve(".codex/skills")
+            ToolKind.Cursor -> home.resolve(".cursor/skills")
+            ToolKind.Gemini -> home.resolve(".gemini/skills")
         }
     }
 
@@ -250,6 +256,9 @@ class DesktopInventoryRepository(
                 ToolKind.Grok -> home.resolve(".grok/memory").resolve("$slug.md")
                 ToolKind.Claude -> home.resolve(".claude/memory").resolve("$slug.md")
                 ToolKind.OpenCode -> home.resolve(".opencode/memory").resolve("$slug.md")
+                ToolKind.Codex -> home.resolve(".codex/memory").resolve("$slug.md")
+                ToolKind.Cursor -> home.resolve(".cursor/memory").resolve("$slug.md")
+                ToolKind.Gemini -> home.resolve(".gemini/memory").resolve("$slug.md")
             }
         }
         val project = Path.of(projectPath)
@@ -264,6 +273,15 @@ class DesktopInventoryRepository(
             }
             ToolKind.OpenCode -> {
                 project.resolve(".opencode/memory").resolve("$slug.md")
+            }
+            ToolKind.Codex -> {
+                project.resolve(".agents/memory").resolve("$slug.md")
+            }
+            ToolKind.Cursor -> {
+                project.resolve(".cursor/memory").resolve("$slug.md")
+            }
+            ToolKind.Gemini -> {
+                project.resolve(".gemini/memory").resolve("$slug.md")
             }
         }
     }
@@ -294,6 +312,22 @@ class DesktopInventoryRepository(
                     listSkillsIn(home.resolve(".config/opencode/skills"), ToolKind.OpenCode, SkillOrigin.User)
             // Two roots can both hold user skills; keep first occurrence of each name.
             result += openCode.distinctBy { it.name.lowercase() }
+        }
+        if (tools.any { it.kind == ToolKind.Codex && it.installed }) {
+            result += listSkillsIn(home.resolve(".codex/skills"), ToolKind.Codex, SkillOrigin.User)
+        }
+        if (tools.any { it.kind == ToolKind.Cursor && it.installed }) {
+            val user = listSkillsIn(home.resolve(".cursor/skills"), ToolKind.Cursor, SkillOrigin.User)
+            val bundled = listSkillsIn(home.resolve(".cursor/skills-cursor"), ToolKind.Cursor, SkillOrigin.Bundled)
+            val userNames = user.map { it.name.lowercase() }.toSet()
+            result += user
+            result += bundled.filter { it.name.lowercase() !in userNames }
+        }
+        if (tools.any { it.kind == ToolKind.Gemini && it.installed }) {
+            val gemini =
+                listSkillsIn(home.resolve(".gemini/skills"), ToolKind.Gemini, SkillOrigin.User) +
+                    listSkillsIn(home.resolve(".gemini/antigravity/skills"), ToolKind.Gemini, SkillOrigin.User)
+            result += gemini.distinctBy { it.name.lowercase() }
         }
         return result
     }
@@ -334,6 +368,15 @@ class DesktopInventoryRepository(
         }
         if (tools.any { it.kind == ToolKind.OpenCode && it.installed }) {
             addMdFiles(home.resolve(".opencode/memory"), ToolKind.OpenCode)
+        }
+        if (tools.any { it.kind == ToolKind.Codex && it.installed }) {
+            addMdFiles(home.resolve(".codex/memory"), ToolKind.Codex)
+        }
+        if (tools.any { it.kind == ToolKind.Cursor && it.installed }) {
+            addMdFiles(home.resolve(".cursor/memory"), ToolKind.Cursor)
+        }
+        if (tools.any { it.kind == ToolKind.Gemini && it.installed }) {
+            addMdFiles(home.resolve(".gemini/memory"), ToolKind.Gemini)
         }
         return result
     }
@@ -380,6 +423,45 @@ class DesktopInventoryRepository(
                         name = cfg.name,
                         path = cfg.absolutePathString(),
                         tool = ToolKind.OpenCode,
+                    )
+            }
+        }
+        if (tools.any { it.kind == ToolKind.Codex && it.installed }) {
+            listOf(
+                home.resolve(".codex/config.toml"),
+                home.resolve(".codex/config.json"),
+            ).firstOrNull { it.exists() }?.let { cfg ->
+                result +=
+                    AgentFileItem(
+                        name = cfg.name,
+                        path = cfg.absolutePathString(),
+                        tool = ToolKind.Codex,
+                    )
+            }
+        }
+        if (tools.any { it.kind == ToolKind.Cursor && it.installed }) {
+            listOf(
+                home.resolve(".cursor/cli-config.json"),
+                home.resolve(".cursor/argv.json"),
+            ).firstOrNull { it.exists() }?.let { cfg ->
+                result +=
+                    AgentFileItem(
+                        name = cfg.name,
+                        path = cfg.absolutePathString(),
+                        tool = ToolKind.Cursor,
+                    )
+            }
+        }
+        if (tools.any { it.kind == ToolKind.Gemini && it.installed }) {
+            listOf(
+                home.resolve(".gemini/settings.json"),
+                home.resolve(".gemini/config.json"),
+            ).firstOrNull { it.exists() }?.let { cfg ->
+                result +=
+                    AgentFileItem(
+                        name = cfg.name,
+                        path = cfg.absolutePathString(),
+                        tool = ToolKind.Gemini,
                     )
             }
         }
@@ -507,6 +589,32 @@ class DesktopInventoryRepository(
                 skills += listSkillsIn(opencodeDir.resolve("skills"), ToolKind.OpenCode, SkillOrigin.Project)
             }
         }
+        val codexDir = projectPath.resolve(".codex")
+        val agentsDir = projectPath.resolve(".agents")
+        if (codexDir.exists() || agentsDir.exists()) {
+            toolsPresent += ToolKind.Codex
+            if (fullDetails) {
+                skills += listSkillsIn(agentsDir.resolve("skills"), ToolKind.Codex, SkillOrigin.Project)
+                skills += listSkillsIn(codexDir.resolve("skills"), ToolKind.Codex, SkillOrigin.Project)
+            }
+        }
+        val cursorDir = projectPath.resolve(".cursor")
+        if (cursorDir.exists()) {
+            toolsPresent += ToolKind.Cursor
+            if (fullDetails) {
+                skills += listSkillsIn(cursorDir.resolve("skills"), ToolKind.Cursor, SkillOrigin.Project)
+            }
+        }
+        val geminiDir = projectPath.resolve(".gemini")
+        val agentDir = projectPath.resolve(".agent")
+        if (geminiDir.exists() || agentDir.exists()) {
+            toolsPresent += ToolKind.Gemini
+            if (fullDetails) {
+                skills += listSkillsIn(geminiDir.resolve("skills"), ToolKind.Gemini, SkillOrigin.Project)
+                // Antigravity project skills
+                skills += listSkillsIn(agentDir.resolve("skills"), ToolKind.Gemini, SkillOrigin.Project)
+            }
+        }
 
         // Agent root files are cheap existence checks; include even on light scan.
         listOf(
@@ -514,6 +622,7 @@ class DesktopInventoryRepository(
             "AGENTS.md" to ToolKind.Grok,
             "opencode.json" to ToolKind.OpenCode,
             ".opencode.json" to ToolKind.OpenCode,
+            "GEMINI.md" to ToolKind.Gemini,
         ).forEach { (fileName, tool) ->
             val f = projectPath.resolve(fileName)
             if (f.exists() && f.isRegularFile()) {
@@ -750,8 +859,14 @@ class DesktopInventoryRepository(
                 ".claude",
                 ".grok",
                 ".opencode",
+                ".codex",
+                ".agents",
+                ".cursor",
+                ".gemini",
+                ".agent",
                 "AGENTS.md",
                 "CLAUDE.md",
+                "GEMINI.md",
                 "opencode.json",
             )
         return markers.any { dir.resolve(it).exists() }

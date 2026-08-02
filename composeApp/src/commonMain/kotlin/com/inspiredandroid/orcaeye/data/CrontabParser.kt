@@ -27,8 +27,8 @@ object CrontabParser {
     private val MARKER = Regex("""^#\s*orcaeye\s+id=(\S+)(?:\s+name=(.*))?$""")
     private val CD_PREFIX = Regex("""^cd\s+('[^']*'|"[^"]*"|\S+)\s*&&\s*""")
     private val PATH_PREFIX = Regex("""^PATH=('[^']*'|"[^"]*"|\S+)\s+""")
-    private val BINARY = Regex("""^\S*?\b(claude|grok|opencode)\s+""")
-    private val PROMPT = Regex("""^(?:-p|--print|run)\s+('[^']*'|"[^"]*"|\S+)\s*""")
+    private val BINARY = Regex("""^\S*?\b(claude|grok|opencode|codex|cursor-agent|gemini)\s+""")
+    private val PROMPT = Regex("""^(?:-p|--print|run|exec)\s+('[^']*'|"[^"]*"|\S+)\s*""")
     private val REDIRECT = Regex("""\s*(?:\d?>>?)\s*('[^']*'|"[^"]*"|\S+)(?:\s*2>&1)?\s*$""")
 
     // region parse
@@ -135,12 +135,24 @@ object CrontabParser {
         val tool = job.tool ?: ToolKind.Grok
         append(binaryName(tool))
         append(' ')
-        append(if (tool == ToolKind.OpenCode) "run" else "-p")
-        append(' ')
-        append(quote(job.prompt))
-        job.extraFlags.trim().takeIf { it.isNotEmpty() }?.let {
+        append(promptMode(tool))
+        // Codex: `codex exec [flags] 'prompt'` — options must precede the positional prompt.
+        // Other CLIs: `binary -p|'run' 'prompt' [flags]`.
+        val flags = job.extraFlags.trim().takeIf { it.isNotEmpty() }
+        if (tool == ToolKind.Codex) {
+            flags?.let {
+                append(' ')
+                append(it)
+            }
             append(' ')
-            append(it)
+            append(quote(job.prompt))
+        } else {
+            append(' ')
+            append(quote(job.prompt))
+            flags?.let {
+                append(' ')
+                append(it)
+            }
         }
         if (includeRedirect) {
             job.logPath?.takeIf { it.isNotBlank() }?.let {
@@ -156,12 +168,25 @@ object CrontabParser {
         ToolKind.Grok -> "--always-approve --permission-mode bypassPermissions"
         ToolKind.Claude -> "--dangerously-skip-permissions"
         ToolKind.OpenCode -> ""
+        ToolKind.Codex -> "--sandbox workspace-write"
+        ToolKind.Cursor -> "--force"
+        ToolKind.Gemini -> "--yolo"
     }
 
     fun binaryName(tool: ToolKind): String = when (tool) {
         ToolKind.Claude -> "claude"
         ToolKind.Grok -> "grok"
         ToolKind.OpenCode -> "opencode"
+        ToolKind.Codex -> "codex"
+        ToolKind.Cursor -> "cursor-agent"
+        ToolKind.Gemini -> "gemini"
+    }
+
+    /** Subcommand / flag that precedes the prompt for [tool]. */
+    fun promptMode(tool: ToolKind): String = when (tool) {
+        ToolKind.OpenCode -> "run"
+        ToolKind.Codex -> "exec"
+        else -> "-p"
     }
 
     /** A short, stable job name from the prompt and project, e.g. `check-updates-kai`. */
@@ -303,14 +328,23 @@ object CrontabParser {
             when (binaryMatch.groupValues[1]) {
                 "claude" -> ToolKind.Claude
                 "grok" -> ToolKind.Grok
+                "opencode" -> ToolKind.OpenCode
+                "codex" -> ToolKind.Codex
+                "cursor-agent" -> ToolKind.Cursor
+                "gemini" -> ToolKind.Gemini
                 else -> ToolKind.OpenCode
             }
         rest = rest.drop(binaryMatch.value.length).trim()
 
-        val promptMatch = PROMPT.find("$rest ") ?: return null
-        val prompt = unquote(promptMatch.groupValues[1])
-        if (prompt.isBlank()) return null
-        val extraFlags = rest.drop(promptMatch.value.length).trim()
+        val (prompt, extraFlags) =
+            if (tool == ToolKind.Codex) {
+                parseCodexPromptAndFlags(rest) ?: return null
+            } else {
+                val promptMatch = PROMPT.find("$rest ") ?: return null
+                val p = unquote(promptMatch.groupValues[1])
+                if (p.isBlank()) return null
+                p to rest.drop(promptMatch.value.length).trim()
+            }
 
         return LoopJob(
             id = id,
@@ -331,6 +365,38 @@ object CrontabParser {
     private fun externalName(line: String): String {
         val command = line.trim().split(Regex("\\s+")).drop(5).joinToString(" ")
         return command.take(60).ifBlank { line.trim().take(60) }
+    }
+
+    /**
+     * Codex non-interactive form: `exec [flags…] prompt`.
+     * Accepts flags before or after the prompt; the prompt is the first quoted token, or
+     * the first non-flag token after `exec`.
+     */
+    private fun parseCodexPromptAndFlags(rest: String): Pair<String, String>? {
+        var body = rest.trim()
+        if (!body.startsWith("exec")) return null
+        body = body.removePrefix("exec").trim()
+        if (body.isEmpty()) return null
+
+        // Prefer a quoted prompt (handles spaces).
+        val quoted = Regex("""('[^']*'|"[^"]*")""").find(body)
+        if (quoted != null) {
+            val prompt = unquote(quoted.value)
+            if (prompt.isBlank()) return null
+            val flags =
+                (body.removeRange(quoted.range).trim())
+                    .replace(Regex("""\s+"""), " ")
+                    .trim()
+            return prompt to flags
+        }
+
+        // Unquoted: first token that is not a flag is the prompt; remaining tokens are flags.
+        val tokens = body.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val promptIdx = tokens.indexOfFirst { !it.startsWith("-") }
+        if (promptIdx < 0) return null
+        val prompt = tokens[promptIdx]
+        val flags = (tokens.take(promptIdx) + tokens.drop(promptIdx + 1)).joinToString(" ")
+        return prompt to flags
     }
 
     private fun unquote(value: String): String = when {

@@ -175,10 +175,133 @@ val OpenCodeIcon: ImageVector
 
 private var _openCode: ImageVector? = null
 
+/** OpenAI Codex-inspired black hex mark. */
+val CodexIcon: ImageVector
+    get() {
+        if (_codex != null) return _codex!!
+        _codex =
+            ImageVector
+                .Builder(
+                    name = "Codex",
+                    defaultWidth = 24.dp,
+                    defaultHeight = 24.dp,
+                    viewportWidth = 24f,
+                    viewportHeight = 24f,
+                ).apply {
+                    path(fill = SolidColor(Color(0xFF111111))) {
+                        moveTo(12f, 2.5f)
+                        lineTo(20f, 7f)
+                        lineTo(20f, 17f)
+                        lineTo(12f, 21.5f)
+                        lineTo(4f, 17f)
+                        lineTo(4f, 7f)
+                        close()
+                    }
+                    path(fill = SolidColor(Color(0xFFF5F5F5))) {
+                        moveTo(12f, 6.2f)
+                        lineTo(16.8f, 9f)
+                        lineTo(16.8f, 15f)
+                        lineTo(12f, 17.8f)
+                        lineTo(7.2f, 15f)
+                        lineTo(7.2f, 9f)
+                        close()
+                    }
+                    path(fill = SolidColor(Color(0xFF111111))) {
+                        moveTo(10.2f, 10f)
+                        lineTo(13.8f, 10f)
+                        lineTo(13.8f, 11.4f)
+                        lineTo(11.6f, 11.4f)
+                        lineTo(11.6f, 14f)
+                        lineTo(10.2f, 14f)
+                        close()
+                    }
+                }.build()
+        return _codex!!
+    }
+
+private var _codex: ImageVector? = null
+
+/** Cursor-inspired diagonal caret. */
+val CursorIcon: ImageVector
+    get() {
+        if (_cursor != null) return _cursor!!
+        _cursor =
+            ImageVector
+                .Builder(
+                    name = "Cursor",
+                    defaultWidth = 24.dp,
+                    defaultHeight = 24.dp,
+                    viewportWidth = 24f,
+                    viewportHeight = 24f,
+                ).apply {
+                    path(fill = SolidColor(Color(0xFF1A1A1A))) {
+                        moveTo(5f, 3.5f)
+                        lineTo(19f, 12f)
+                        lineTo(12.2f, 13.8f)
+                        lineTo(9.5f, 20.5f)
+                        close()
+                    }
+                    path(fill = SolidColor(Color(0xFFE8E8E8))) {
+                        moveTo(7.2f, 6.2f)
+                        lineTo(15.2f, 11.4f)
+                        lineTo(11.4f, 12.4f)
+                        lineTo(9.8f, 16.2f)
+                        close()
+                    }
+                }.build()
+        return _cursor!!
+    }
+
+private var _cursor: ImageVector? = null
+
+/** Gemini-inspired four-point sparkle. */
+val GeminiIcon: ImageVector
+    get() {
+        if (_gemini != null) return _gemini!!
+        _gemini =
+            ImageVector
+                .Builder(
+                    name = "Gemini",
+                    defaultWidth = 24.dp,
+                    defaultHeight = 24.dp,
+                    viewportWidth = 24f,
+                    viewportHeight = 24f,
+                ).apply {
+                    path(fill = SolidColor(Color(0xFF4285F4))) {
+                        moveTo(12f, 2.5f)
+                        lineTo(14.2f, 9.8f)
+                        lineTo(21.5f, 12f)
+                        lineTo(14.2f, 14.2f)
+                        lineTo(12f, 21.5f)
+                        lineTo(9.8f, 14.2f)
+                        lineTo(2.5f, 12f)
+                        lineTo(9.8f, 9.8f)
+                        close()
+                    }
+                    path(fill = SolidColor(Color(0xFF8AB4F8))) {
+                        moveTo(12f, 7.2f)
+                        lineTo(13f, 11f)
+                        lineTo(16.8f, 12f)
+                        lineTo(13f, 13f)
+                        lineTo(12f, 16.8f)
+                        lineTo(11f, 13f)
+                        lineTo(7.2f, 12f)
+                        lineTo(11f, 11f)
+                        close()
+                    }
+                }.build()
+        return _gemini!!
+    }
+
+private var _gemini: ImageVector? = null
+
 fun ToolKind.icon(): ImageVector = when (this) {
     ToolKind.Claude -> ClaudeIcon
     ToolKind.Grok -> GrokIcon
     ToolKind.OpenCode -> OpenCodeIcon
+    ToolKind.Codex -> CodexIcon
+    ToolKind.Cursor -> CursorIcon
+    ToolKind.Gemini -> GeminiIcon
 }
 
 @Composable
