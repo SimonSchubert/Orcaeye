@@ -72,7 +72,6 @@ fun BrowserScreen(
     onRequestDeleteFromEditor: () -> Unit,
     onCancelDelete: () -> Unit,
     onConfirmDelete: () -> Unit,
-    onClearStatus: () -> Unit,
     onOpenTool: (ToolKind, String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -96,7 +95,6 @@ fun BrowserScreen(
                     onClosePreview = onClosePreview,
                     onShowCreate = onShowCreate,
                     onRequestDeleteFromEditor = onRequestDeleteFromEditor,
-                    onClearStatus = onClearStatus,
                     onOpenTool = onOpenTool,
                 )
             AppSection.Loops ->
@@ -224,7 +222,6 @@ private fun ContextBody(
     onClosePreview: () -> Unit,
     onShowCreate: (CreateKind, String?, List<ToolKind>) -> Unit,
     onRequestDeleteFromEditor: () -> Unit,
-    onClearStatus: () -> Unit,
     onOpenTool: (ToolKind, String?) -> Unit,
 ) {
     when {
@@ -256,7 +253,6 @@ private fun ContextBody(
                     onOpenMemory = onOpenMemory,
                     onOpenFile = onOpenFile,
                     onShowCreate = onShowCreate,
-                    onClearStatus = onClearStatus,
                     onOpenTool = onOpenTool,
                     modifier =
                     Modifier
@@ -352,13 +348,38 @@ private fun Sidebar(
             },
             onClick = onSelectSystem,
         )
-        Text(
-            "Projects",
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 16.dp, bottom = 6.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(
+            modifier =
+            Modifier.padding(start = 12.dp, end = 12.dp, top = 16.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "Projects",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (state.projectsLoading) {
+                CircularProgressIndicator(
+                    modifier =
+                    Modifier
+                        .height(12.dp)
+                        .width(12.dp),
+                    strokeWidth = 1.5.dp,
+                )
+            }
+        }
         ScrollableLazyColumn(modifier = Modifier.weight(1f)) {
+            if (state.projectsLoading && state.projects.isEmpty()) {
+                item {
+                    Text(
+                        "Scanning…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
             items(state.projects, key = { it.path }) { project ->
                 NavRow(
                     label = project.name,
@@ -425,7 +446,6 @@ private fun MainPane(
     onOpenMemory: (MemoryItem) -> Unit,
     onOpenFile: (path: String, title: String) -> Unit,
     onShowCreate: (CreateKind, String?, List<ToolKind>) -> Unit,
-    onClearStatus: () -> Unit,
     onOpenTool: (ToolKind, String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -441,9 +461,7 @@ private fun MainPane(
             SystemContent(
                 snapshot = snapshot,
                 loading = state.loading,
-                statusMessage = state.statusMessage,
                 onRefresh = onRefresh,
-                onClearStatus = onClearStatus,
                 onOpenSkill = onOpenSkill,
                 onOpenMemory = onOpenMemory,
                 onOpenFile = onOpenFile,
@@ -455,14 +473,18 @@ private fun MainPane(
         is BrowseSelection.Project -> {
             val project = state.selectedProject
             if (project == null) {
-                Box(modifier.padding(16.dp)) { Text("Project not found") }
+                Box(modifier.padding(16.dp), contentAlignment = Alignment.Center) {
+                    if (state.projectsLoading || state.projectDetailsLoading) {
+                        CircularProgressIndicator()
+                    } else {
+                        Text("Project not found")
+                    }
+                }
             } else {
                 ProjectContent(
                     project = project,
-                    loading = state.loading,
-                    statusMessage = state.statusMessage,
+                    loading = state.loading || state.projectDetailsLoading || !project.detailsLoaded,
                     onRefresh = onRefresh,
-                    onClearStatus = onClearStatus,
                     onOpenSkill = onOpenSkill,
                     onOpenMemory = onOpenMemory,
                     onOpenFile = onOpenFile,
@@ -480,9 +502,7 @@ private fun MainPane(
 private fun SystemContent(
     snapshot: AppSnapshot,
     loading: Boolean,
-    statusMessage: String?,
     onRefresh: () -> Unit,
-    onClearStatus: () -> Unit,
     onOpenSkill: (SkillItem) -> Unit,
     onOpenMemory: (MemoryItem) -> Unit,
     onOpenFile: (path: String, title: String) -> Unit,
@@ -501,9 +521,7 @@ private fun SystemContent(
                 title = "System",
                 subtitle = "Skills, memories, and config across installed tools",
                 loading = loading,
-                statusMessage = statusMessage,
                 onRefresh = onRefresh,
-                onClearStatus = onClearStatus,
             )
         }
         ToolKind.entries.forEach { kind ->
@@ -579,9 +597,7 @@ private fun SystemContent(
 private fun ProjectContent(
     project: ProjectInventory,
     loading: Boolean,
-    statusMessage: String?,
     onRefresh: () -> Unit,
-    onClearStatus: () -> Unit,
     onOpenSkill: (SkillItem) -> Unit,
     onOpenMemory: (MemoryItem) -> Unit,
     onOpenFile: (path: String, title: String) -> Unit,
@@ -606,9 +622,7 @@ private fun ProjectContent(
                 title = project.name,
                 subtitle = project.path,
                 loading = loading,
-                statusMessage = statusMessage,
                 onRefresh = onRefresh,
-                onClearStatus = onClearStatus,
             )
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -632,10 +646,31 @@ private fun ProjectContent(
                 }
             }
         }
+        if (!project.detailsLoaded || loading) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.height(18.dp).width(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Text(
+                        if (project.detailsLoaded) "Refreshing…" else "Loading project details…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
         item {
             SectionCard(title = "Agent files", subtitle = "${project.agentFiles.size}") {
                 if (project.agentFiles.isEmpty()) {
-                    EmptyHint("No AGENTS.md / CLAUDE.md")
+                    EmptyHint(
+                        if (!project.detailsLoaded) "…" else "No AGENTS.md / CLAUDE.md",
+                    )
                 } else {
                     project.agentFiles.forEach { AgentRow(it, onOpenFile) }
                 }
@@ -644,13 +679,18 @@ private fun ProjectContent(
         item {
             PlainCard {
                 SectionHeaderWithAdd(
-                    title = "Skills (${project.skills.size})",
+                    title =
+                    if (project.detailsLoaded) {
+                        "Skills (${project.skills.size})"
+                    } else {
+                        "Skills"
+                    },
                     onAdd = {
                         onShowCreate(CreateKind.Skill, project.path, toolsForCreate)
                     },
                 )
                 if (project.skills.isEmpty()) {
-                    EmptyHint("No project skills")
+                    EmptyHint(if (!project.detailsLoaded) "…" else "No project skills")
                 } else {
                     project.skills.forEach { SkillRow(it, onOpenSkill) }
                 }
@@ -659,13 +699,18 @@ private fun ProjectContent(
         item {
             PlainCard {
                 SectionHeaderWithAdd(
-                    title = "Memories (${project.memories.size})",
+                    title =
+                    if (project.detailsLoaded) {
+                        "Memories (${project.memories.size})"
+                    } else {
+                        "Memories"
+                    },
                     onAdd = {
                         onShowCreate(CreateKind.Memory, project.path, toolsForCreate)
                     },
                 )
                 if (project.memories.isEmpty()) {
-                    EmptyHint("No project memories found")
+                    EmptyHint(if (!project.detailsLoaded) "…" else "No project memories found")
                 } else {
                     project.memories.forEach { MemoryRow(it, onOpenMemory) }
                 }

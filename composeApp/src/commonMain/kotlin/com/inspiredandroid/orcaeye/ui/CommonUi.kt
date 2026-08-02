@@ -34,14 +34,12 @@ internal fun DetailToolbar(
     title: String,
     subtitle: String?,
     loading: Boolean,
-    statusMessage: String?,
     onRefresh: () -> Unit,
-    onClearStatus: () -> Unit,
     actions: @Composable () -> Unit = {},
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.headlineSmall)
@@ -53,40 +51,24 @@ internal fun DetailToolbar(
                 )
             }
         }
-        Column(horizontalAlignment = Alignment.End) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (loading) {
-                    CircularProgressIndicator(
-                        modifier =
-                        Modifier
-                            .padding(end = 8.dp)
-                            .height(18.dp)
-                            .width(18.dp),
-                        strokeWidth = 2.dp,
-                    )
-                }
-                actions()
-                TextButton(
-                    onClick = onRefresh,
-                    enabled = !loading,
-                    modifier = Modifier.hoverHand(),
-                ) {
-                    Text("Refresh")
-                }
-            }
-            if (statusMessage != null) {
-                Text(
-                    text = statusMessage,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (loading) {
+                CircularProgressIndicator(
                     modifier =
                     Modifier
-                        .padding(top = 2.dp)
-                        .hoverClickable(onClick = onClearStatus)
-                        .padding(horizontal = 4.dp, vertical = 2.dp),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                        .padding(end = 8.dp)
+                        .height(18.dp)
+                        .width(18.dp),
+                    strokeWidth = 2.dp,
                 )
+            }
+            actions()
+            TextButton(
+                onClick = onRefresh,
+                enabled = !loading,
+                modifier = Modifier.hoverHand(),
+            ) {
+                Text("Refresh")
             }
         }
     }

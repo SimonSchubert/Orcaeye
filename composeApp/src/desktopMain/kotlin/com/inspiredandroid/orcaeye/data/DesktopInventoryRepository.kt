@@ -32,23 +32,64 @@ class DesktopInventoryRepository(
 
     override suspend fun loadSnapshot(): AppSnapshot = withContext(Dispatchers.IO) {
         warnings.clear()
-        val tools = detectTools()
-        val systemSkills = scanSystemSkills(tools)
-        val systemMemories = scanSystemMemories(tools)
-        val systemAgentFiles = scanSystemAgentFiles(tools)
-        val projects = discoverAndScanProjects(tools)
-        val linkedProjectPaths = projects.map { it.path }.toSet()
+        val system = buildSystemSnapshot(includeVersions = true)
+        val discovered = discoverAndScanProjects(fullDetails = true)
+        val linkedProjectPaths = discovered.projects.map { it.path }.toSet()
         val unlinked =
             collectGrokProjectMemories()
                 .filter { it.projectPath == null || it.projectPath !in linkedProjectPaths }
 
-        AppSnapshot(
+        system.copy(
+            projects = discovered.projects.sortedBy { it.name.lowercase() },
+            unlinkedMemories = unlinked.sortedBy { it.title.lowercase() },
+            warnings = (system.warnings + warnings).distinct(),
+        )
+    }
+
+    override suspend fun loadSystemSnapshot(): AppSnapshot = withContext(Dispatchers.IO) {
+        warnings.clear()
+        buildSystemSnapshot(includeVersions = false)
+    }
+
+    override suspend fun discoverProjects(): DiscoveredProjects = withContext(Dispatchers.IO) {
+        warnings.clear()
+        val discovered = discoverAndScanProjects(fullDetails = false)
+        val linkedProjectPaths = discovered.projects.map { it.path }.toSet()
+        val unlinked =
+            collectGrokProjectMemories()
+                .filter { it.projectPath == null || it.projectPath !in linkedProjectPaths }
+                .sortedBy { it.title.lowercase() }
+        DiscoveredProjects(
+            projects = discovered.projects.sortedBy { it.name.lowercase() },
+            unlinkedMemories = unlinked,
+            warnings = warnings.toList(),
+        )
+    }
+
+    override suspend fun loadProject(path: String): ProjectInventory? = withContext(Dispatchers.IO) {
+        val normalized = normalizeExistingDir(path) ?: return@withContext null
+        val claudeMemoryByProject = indexClaudeMemoriesByProject()
+        val grokMemories = collectGrokProjectMemories()
+        scanProject(
+            projectPath = Path.of(normalized),
+            claudeMemoryByProject = claudeMemoryByProject,
+            grokMemories = grokMemories,
+            fullDetails = true,
+        )
+    }
+
+    private fun buildSystemSnapshot(includeVersions: Boolean): AppSnapshot {
+        val tools = toolDetector.detectTools(includeVersions = includeVersions)
+        val systemSkills = scanSystemSkills(tools)
+        val systemMemories = scanSystemMemories(tools)
+        val systemAgentFiles = scanSystemAgentFiles(tools)
+        return AppSnapshot(
             tools = tools,
             systemSkills = systemSkills.sortedWith(skillDisplayOrder),
             systemMemories = systemMemories.sortedBy { it.title.lowercase() },
             systemAgentFiles = systemAgentFiles.sortedBy { it.name.lowercase() },
-            projects = projects.sortedBy { it.name.lowercase() },
-            unlinkedMemories = unlinked.sortedBy { it.title.lowercase() },
+            projects = emptyList(),
+            unlinkedMemories = emptyList(),
             warnings = warnings.toList(),
         )
     }
@@ -234,8 +275,6 @@ class DesktopInventoryRepository(
         .replace(Regex("[^a-z0-9._-]+"), "")
         .trim('-', '.', '_')
 
-    private fun detectTools(): List<ToolInstall> = toolDetector.detectTools()
-
     private fun scanSystemSkills(tools: List<ToolInstall>): List<SkillItem> {
         val result = mutableListOf<SkillItem>()
         if (tools.any { it.kind == ToolKind.Claude && it.installed }) {
@@ -347,16 +386,24 @@ class DesktopInventoryRepository(
         return result
     }
 
-    private fun discoverAndScanProjects(tools: List<ToolInstall>): List<ProjectInventory> {
-        val paths = LinkedHashSet<String>()
-        paths.addAll(discoverFromClaudeJson())
-        paths.addAll(discoverFromClaudeProjectsDirs())
-        paths.addAll(discoverFromGrokTrusted())
-        paths.addAll(discoverFromGrokSessions())
-        paths.addAll(discoverFromProjectsFolder())
+    /**
+     * @param fullDetails when true, list skills and attach Claude/Grok memories (slow).
+     * When false, only markers + agent file presence (fast sidebar stubs).
+     */
+    private fun discoverAndScanProjects(fullDetails: Boolean): ProjectScanResult {
+        val fromClaude = discoverFromClaudeJson() + discoverFromClaudeProjectsDirs()
+        val fromGrok = discoverFromGrokTrusted() + discoverFromGrokSessions()
+        val fromFolder = discoverFromProjectsFolder()
 
-        val claudeMemoryByProject = indexClaudeMemoriesByProject()
-        val grokMemories = collectGrokProjectMemories()
+        val paths = LinkedHashSet<String>()
+        paths.addAll(fromClaude)
+        paths.addAll(fromGrok)
+        paths.addAll(fromFolder)
+
+        val claudeNormalized =
+            fromClaude.mapNotNull { normalizeExistingDir(it) }.toCollection(LinkedHashSet())
+        val grokNormalized =
+            fromGrok.mapNotNull { normalizeExistingDir(it) }.toCollection(LinkedHashSet())
 
         // Normalize so /Users/... and realpath/symlink variants collapse to one project.
         val normalized =
@@ -364,17 +411,51 @@ class DesktopInventoryRepository(
                 .mapNotNull { pathStr -> normalizeExistingDir(pathStr) }
                 .toCollection(LinkedHashSet())
 
-        return normalized.mapNotNull { pathStr ->
-            val projectPath = Path.of(pathStr)
-            val inv = scanProject(projectPath, claudeMemoryByProject, grokMemories)
-            inv.takeIf {
-                it.toolsPresent.isNotEmpty() ||
-                    it.skills.isNotEmpty() ||
-                    it.agentFiles.isNotEmpty() ||
-                    it.memories.isNotEmpty()
+        val claudeMemoryByProject =
+            if (fullDetails) indexClaudeMemoriesByProject() else emptyMap()
+        val grokMemories =
+            if (fullDetails) collectGrokProjectMemories() else emptyList()
+
+        val projects =
+            normalized.mapNotNull { pathStr ->
+                val projectPath = Path.of(pathStr)
+                val inv =
+                    scanProject(
+                        projectPath = projectPath,
+                        claudeMemoryByProject = claudeMemoryByProject,
+                        grokMemories = grokMemories,
+                        fullDetails = fullDetails,
+                    )
+                // Registry-only paths may have Claude/Grok memories with no local markers.
+                // On the light pass we keep them so the sidebar appears quickly; a full scan
+                // drops empties after memories are attached (same filter as before).
+                val fromRegistry =
+                    pathStr in claudeNormalized || pathStr in grokNormalized
+                val enriched =
+                    if (!fullDetails && fromRegistry) {
+                        val tools =
+                            inv.toolsPresent.toMutableSet().apply {
+                                if (pathStr in claudeNormalized) add(ToolKind.Claude)
+                                if (pathStr in grokNormalized) add(ToolKind.Grok)
+                            }
+                        inv.copy(toolsPresent = tools)
+                    } else {
+                        inv
+                    }
+                enriched.takeIf {
+                    it.toolsPresent.isNotEmpty() ||
+                        it.skills.isNotEmpty() ||
+                        it.agentFiles.isNotEmpty() ||
+                        it.memories.isNotEmpty() ||
+                        (!fullDetails && fromRegistry)
+                }
             }
-        }
+        return ProjectScanResult(projects = projects)
     }
+
+    private data class ProjectScanResult(
+        val projects: List<ProjectInventory>,
+    )
 
     private fun normalizeExistingDir(pathStr: String): String? {
         val path = Path.of(pathStr)
@@ -396,6 +477,7 @@ class DesktopInventoryRepository(
         projectPath: Path,
         claudeMemoryByProject: Map<String, List<MemoryItem>>,
         grokMemories: List<MemoryItem>,
+        fullDetails: Boolean,
     ): ProjectInventory {
         val abs =
             try {
@@ -411,19 +493,26 @@ class DesktopInventoryRepository(
         val claudeDir = projectPath.resolve(".claude")
         if (claudeDir.exists()) {
             toolsPresent += ToolKind.Claude
-            skills += listSkillsIn(claudeDir.resolve("skills"), ToolKind.Claude, SkillOrigin.Project)
+            if (fullDetails) {
+                skills += listSkillsIn(claudeDir.resolve("skills"), ToolKind.Claude, SkillOrigin.Project)
+            }
         }
         val grokDir = projectPath.resolve(".grok")
         if (grokDir.exists()) {
             toolsPresent += ToolKind.Grok
-            skills += listSkillsIn(grokDir.resolve("skills"), ToolKind.Grok, SkillOrigin.Project)
+            if (fullDetails) {
+                skills += listSkillsIn(grokDir.resolve("skills"), ToolKind.Grok, SkillOrigin.Project)
+            }
         }
         val opencodeDir = projectPath.resolve(".opencode")
         if (opencodeDir.exists()) {
             toolsPresent += ToolKind.OpenCode
-            skills += listSkillsIn(opencodeDir.resolve("skills"), ToolKind.OpenCode, SkillOrigin.Project)
+            if (fullDetails) {
+                skills += listSkillsIn(opencodeDir.resolve("skills"), ToolKind.OpenCode, SkillOrigin.Project)
+            }
         }
 
+        // Agent root files are cheap existence checks; include even on light scan.
         listOf(
             "CLAUDE.md" to ToolKind.Claude,
             "AGENTS.md" to ToolKind.Grok,
@@ -442,52 +531,55 @@ class DesktopInventoryRepository(
             }
         }
 
-        // Match Claude memories by real path or by encode of any known alias
-        claudeMemoryByProject[abs]?.let { memories += it }
-        claudeMemoryByProject.forEach { (key, items) ->
-            if (key != abs && normalizeExistingDir(key) == abs) {
-                items.forEach { item ->
-                    if (memories.none { it.path == item.path }) {
-                        memories += item.copy(projectPath = abs)
+        if (fullDetails) {
+            // Match Claude memories by real path or by encode of any known alias
+            claudeMemoryByProject[abs]?.let { memories += it }
+            claudeMemoryByProject.forEach { (key, items) ->
+                if (key != abs && normalizeExistingDir(key) == abs) {
+                    items.forEach { item ->
+                        if (memories.none { it.path == item.path }) {
+                            memories += item.copy(projectPath = abs)
+                        }
                     }
                 }
             }
-        }
 
-        // Grok: match by project path, or name heuristic on slug
-        val projectName = projectPath.name
-        val nameKey = projectName.lowercase()
-        grokMemories
-            .filter { mem ->
-                when {
-                    mem.projectPath == abs -> true
-                    mem.projectPath != null -> false
-                    else -> {
-                        val title = mem.title.lowercase()
-                        val compact = nameKey.replace(" ", "").replace("_", "")
-                        title.startsWith(nameKey) ||
-                            title.startsWith(compact) ||
-                            title.startsWith(nameKey.replace("-", ""))
+            // Grok: match by project path, or name heuristic on slug
+            val projectName = projectPath.name
+            val nameKey = projectName.lowercase()
+            grokMemories
+                .filter { mem ->
+                    when {
+                        mem.projectPath == abs -> true
+                        mem.projectPath != null -> false
+                        else -> {
+                            val title = mem.title.lowercase()
+                            val compact = nameKey.replace(" ", "").replace("_", "")
+                            title.startsWith(nameKey) ||
+                                title.startsWith(compact) ||
+                                title.startsWith(nameKey.replace("-", ""))
+                        }
+                    }
+                }.forEach { mem ->
+                    if (memories.none { it.path == mem.path }) {
+                        memories += mem.copy(projectPath = abs)
+                        toolsPresent += ToolKind.Grok
                     }
                 }
-            }.forEach { mem ->
-                if (memories.none { it.path == mem.path }) {
-                    memories += mem.copy(projectPath = abs)
-                    toolsPresent += ToolKind.Grok
-                }
-            }
 
-        if (memories.any { it.tool == ToolKind.Claude }) {
-            toolsPresent += ToolKind.Claude
+            if (memories.any { it.tool == ToolKind.Claude }) {
+                toolsPresent += ToolKind.Claude
+            }
         }
 
         return ProjectInventory(
             path = abs,
-            name = projectName,
+            name = projectPath.name,
             toolsPresent = toolsPresent,
             agentFiles = agentFiles.sortedBy { it.name.lowercase() },
             skills = skills.sortedBy { it.name.lowercase() },
             memories = memories.sortedBy { it.title.lowercase() },
+            detailsLoaded = fullDetails,
         )
     }
 

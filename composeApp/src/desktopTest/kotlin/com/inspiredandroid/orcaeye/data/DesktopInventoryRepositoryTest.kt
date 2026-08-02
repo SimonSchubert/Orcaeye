@@ -3,8 +3,10 @@ package com.inspiredandroid.orcaeye.data
 import com.inspiredandroid.orcaeye.model.SkillOrigin
 import com.inspiredandroid.orcaeye.model.ToolKind
 import kotlinx.coroutines.runBlocking
+import kotlin.system.measureTimeMillis
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class DesktopInventoryRepositoryTest {
@@ -23,6 +25,7 @@ class DesktopInventoryRepositoryTest {
             "expected Grok system skills",
         )
         assertTrue(snapshot.projects.isNotEmpty(), "expected projects")
+        assertTrue(snapshot.projects.all { it.detailsLoaded }, "full snapshot projects are detailed")
         assertTrue(
             snapshot.projects.any { it.name.contains("Braincup", ignoreCase = true) } ||
                 snapshot.projects.any { it.skills.isNotEmpty() },
@@ -41,6 +44,50 @@ class DesktopInventoryRepositoryTest {
                     "skills=${it.skills.size} mem=${it.memories.size} agents=${it.agentFiles.size}",
             )
         }
+    }
+
+    @Test
+    fun progressiveLoadSystemThenProjectsThenDetails() = runBlocking {
+        val repo = DesktopInventoryRepository()
+
+        val systemMs =
+            measureTimeMillis {
+                val system = repo.loadSystemSnapshot()
+                assertTrue(system.tools.any { it.installed }, "expected installed tools")
+                assertTrue(system.systemSkills.isNotEmpty(), "system skills on first paint")
+                assertTrue(system.projects.isEmpty(), "projects deferred past system snapshot")
+                // Cold start skips --version probes
+                assertTrue(system.tools.all { it.version == null }, "versions deferred on system path")
+            }
+
+        lateinit var stubs: List<com.inspiredandroid.orcaeye.model.ProjectInventory>
+        val discoverMs =
+            measureTimeMillis {
+                val discovered = repo.discoverProjects()
+                stubs = discovered.projects
+                assertTrue(stubs.isNotEmpty(), "expected discovered projects")
+                assertTrue(stubs.all { !it.detailsLoaded }, "stubs must not be fully scanned")
+                assertTrue(
+                    stubs.all { it.skills.isEmpty() && it.memories.isEmpty() },
+                    "light scan skips skills/memories",
+                )
+            }
+
+        val target =
+            stubs.firstOrNull { it.name.contains("Braincup", ignoreCase = true) }
+                ?: stubs.first()
+        val detailMs =
+            measureTimeMillis {
+                val full = repo.loadProject(target.path)
+                assertNotNull(full)
+                assertTrue(full.detailsLoaded)
+                // At least one project in this environment has content; if not, path still resolves.
+                assertEquals(target.path, full.path)
+            }
+
+        println("timing system=${systemMs}ms discover=${discoverMs}ms detail=${detailMs}ms stubs=${stubs.size}")
+        assertTrue(systemMs < 5_000, "system snapshot should be quick")
+        assertTrue(discoverMs < 10_000, "discovery should be reasonable")
     }
 
     @Test

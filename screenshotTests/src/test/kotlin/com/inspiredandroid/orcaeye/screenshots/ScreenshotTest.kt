@@ -105,7 +105,6 @@ class ScreenshotTest {
                             onRequestDeleteFromEditor = {},
                             onCancelDelete = {},
                             onConfirmDelete = {},
-                            onClearStatus = {},
                             onOpenTool = { _, _ -> },
                             modifier = Modifier.fillMaxSize(),
                         )

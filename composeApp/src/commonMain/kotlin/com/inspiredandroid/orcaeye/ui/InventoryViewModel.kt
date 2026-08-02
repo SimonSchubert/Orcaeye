@@ -14,6 +14,7 @@ import com.inspiredandroid.orcaeye.model.ProjectInventory
 import com.inspiredandroid.orcaeye.model.SkillItem
 import com.inspiredandroid.orcaeye.model.SkillOrigin
 import com.inspiredandroid.orcaeye.model.ToolKind
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,8 +23,11 @@ import kotlinx.coroutines.launch
 
 data class InventoryUiState(
     val loading: Boolean = true,
+    /** Project path discovery still running after system snapshot is shown. */
+    val projectsLoading: Boolean = false,
+    /** Full scan of the selected project (skills/memories) in progress. */
+    val projectDetailsLoading: Boolean = false,
     val error: String? = null,
-    val statusMessage: String? = null,
     val section: AppSection = AppSection.Context,
     val snapshot: AppSnapshot? = null,
     val selection: BrowseSelection = BrowseSelection.System,
@@ -61,6 +65,9 @@ class InventoryViewModel(
     private val _state = MutableStateFlow(InventoryUiState())
     val state: StateFlow<InventoryUiState> = _state.asStateFlow()
 
+    private var refreshJob: Job? = null
+    private var projectLoadJob: Job? = null
+
     init {
         refresh()
     }
@@ -69,64 +76,113 @@ class InventoryViewModel(
         _state.update {
             it.copy(
                 section = section,
-                // Keep context state when switching away; clear editor noise optional
             )
         }
     }
 
+    /**
+     * Progressive refresh:
+     * 1. System inventory (tools + global skills/memories) → first paint
+     * 2. Lightweight project discovery → sidebar
+     * 3. If a project is selected, full-scan it on demand
+     */
     fun refresh() {
-        viewModelScope.launch {
-            _state.update { it.copy(loading = true, error = null) }
-            try {
-                val snapshot = repository.loadSnapshot()
-                _state.update { current ->
-                    val selection =
-                        when (val sel = current.selection) {
-                            BrowseSelection.System -> BrowseSelection.System
-                            is BrowseSelection.Project -> {
-                                if (snapshot.projects.any { it.path == sel.path }) {
-                                    sel
-                                } else {
-                                    BrowseSelection.System
-                                }
-                            }
-                        }
-                    val preview = current.preview
-                    val refreshedPreview =
-                        if (preview != null) {
-                            try {
-                                preview.copy(content = repository.readFile(preview.path))
-                            } catch (_: Exception) {
-                                null
-                            }
-                        } else {
-                            null
-                        }
-                    current.copy(
-                        loading = false,
-                        snapshot = snapshot,
-                        selection = selection,
-                        error = null,
-                        preview = refreshedPreview,
-                        draftContent = refreshedPreview?.content ?: current.draftContent,
-                        dirty = false,
-                    )
-                }
-            } catch (e: Exception) {
+        refreshJob?.cancel()
+        projectLoadJob?.cancel()
+        refreshJob =
+            viewModelScope.launch {
                 _state.update {
                     it.copy(
-                        loading = false,
-                        error = e.message ?: e::class.simpleName ?: "Unknown error",
+                        loading = true,
+                        projectsLoading = true,
+                        projectDetailsLoading = false,
+                        error = null,
                     )
                 }
+                try {
+                    val system = repository.loadSystemSnapshot()
+                    _state.update { current ->
+                        // Paint System immediately; keep previous project rows until discovery finishes.
+                        current.copy(
+                            loading = false,
+                            snapshot =
+                            system.copy(
+                                projects = current.snapshot?.projects.orEmpty(),
+                                unlinkedMemories = current.snapshot?.unlinkedMemories.orEmpty(),
+                            ),
+                            error = null,
+                        )
+                    }
+
+                    val discovered = repository.discoverProjects()
+                    _state.update { current ->
+                        val snap = current.snapshot ?: system
+                        val selection =
+                            when (val sel = current.selection) {
+                                BrowseSelection.System -> BrowseSelection.System
+                                is BrowseSelection.Project -> {
+                                    if (discovered.projects.any { it.path == sel.path }) {
+                                        sel
+                                    } else {
+                                        BrowseSelection.System
+                                    }
+                                }
+                            }
+                        current.copy(
+                            projectsLoading = false,
+                            snapshot =
+                            snap.copy(
+                                projects = discovered.projects,
+                                unlinkedMemories = discovered.unlinkedMemories,
+                                warnings =
+                                (snap.warnings + discovered.warnings).distinct(),
+                            ),
+                            selection = selection,
+                        )
+                    }
+
+                    // Refresh open preview content if any
+                    val preview = _state.value.preview
+                    if (preview != null) {
+                        try {
+                            val content = repository.readFile(preview.path)
+                            _state.update {
+                                it.copy(
+                                    preview = preview.copy(content = content),
+                                    draftContent = content,
+                                    dirty = false,
+                                )
+                            }
+                        } catch (_: Exception) {
+                            _state.update {
+                                it.copy(preview = null, draftContent = "", dirty = false)
+                            }
+                        }
+                    }
+
+                    val selectedPath = (_state.value.selection as? BrowseSelection.Project)?.path
+                    if (selectedPath != null) {
+                        ensureProjectDetailsLoaded(selectedPath)
+                    }
+                } catch (e: Exception) {
+                    _state.update {
+                        it.copy(
+                            loading = false,
+                            projectsLoading = false,
+                            projectDetailsLoading = false,
+                            error = e.message ?: e::class.simpleName ?: "Unknown error",
+                        )
+                    }
+                }
             }
-        }
     }
 
     fun selectSystem() {
+        projectLoadJob?.cancel()
         _state.update {
             it.copy(
                 selection = BrowseSelection.System,
+                projectDetailsLoading = false,
                 preview = null,
                 draftContent = "",
                 dirty = false,
@@ -143,6 +199,54 @@ class InventoryViewModel(
                 dirty = false,
             )
         }
+        ensureProjectDetailsLoaded(path)
+    }
+
+    private fun ensureProjectDetailsLoaded(path: String) {
+        val existing = _state.value.snapshot?.projects?.firstOrNull { it.path == path }
+        if (existing?.detailsLoaded == true) {
+            _state.update { it.copy(projectDetailsLoading = false) }
+            return
+        }
+        projectLoadJob?.cancel()
+        projectLoadJob =
+            viewModelScope.launch {
+                _state.update { it.copy(projectDetailsLoading = true) }
+                try {
+                    val full = repository.loadProject(path)
+                    _state.update { current ->
+                        // Drop result if the user navigated away.
+                        val stillSelected =
+                            (current.selection as? BrowseSelection.Project)?.path == path
+                        if (!stillSelected) {
+                            return@update current.copy(projectDetailsLoading = false)
+                        }
+                        val snap = current.snapshot
+                        if (snap == null) {
+                            return@update current.copy(projectDetailsLoading = false)
+                        }
+                        if (full == null) {
+                            return@update current.copy(
+                                projectDetailsLoading = false,
+                                selection = BrowseSelection.System,
+                            )
+                        }
+                        val projects =
+                            snap.projects.map { p ->
+                                if (p.path == path || p.path == full.path) full else p
+                            }.let { list ->
+                                if (list.none { it.path == full.path }) list + full else list
+                            }.sortedBy { it.name.lowercase() }
+                        current.copy(
+                            projectDetailsLoading = false,
+                            snapshot = snap.copy(projects = projects),
+                            selection = BrowseSelection.Project(full.path),
+                        )
+                    }
+                } catch (_: Exception) {
+                    _state.update { it.copy(projectDetailsLoading = false) }
+                }
+            }
     }
 
     fun openSkill(skill: SkillItem) {
@@ -205,7 +309,7 @@ class InventoryViewModel(
         val preview = _state.value.preview ?: return
         val draft = _state.value.draftContent
         viewModelScope.launch {
-            _state.update { it.copy(saving = true, statusMessage = null) }
+            _state.update { it.copy(saving = true) }
             try {
                 repository.writeFile(preview.path, draft)
                 _state.update {
@@ -213,16 +317,10 @@ class InventoryViewModel(
                         saving = false,
                         dirty = false,
                         preview = preview.copy(content = draft),
-                        statusMessage = "Saved ${preview.title}",
                     )
                 }
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(
-                        saving = false,
-                        statusMessage = "Save failed: ${e.message}",
-                    )
-                }
+            } catch (_: Exception) {
+                _state.update { it.copy(saving = false) }
             }
         }
     }
@@ -246,7 +344,7 @@ class InventoryViewModel(
     fun confirmDelete() {
         val path = _state.value.deleteConfirmPath ?: return
         viewModelScope.launch {
-            _state.update { it.copy(deleteConfirmPath = null, deleteConfirmTitle = null, statusMessage = null) }
+            _state.update { it.copy(deleteConfirmPath = null, deleteConfirmTitle = null) }
             try {
                 repository.deleteEntry(path)
                 val closedPreview =
@@ -259,12 +357,17 @@ class InventoryViewModel(
                         preview = closedPreview,
                         draftContent = closedPreview?.content.orEmpty(),
                         dirty = false,
-                        statusMessage = "Deleted",
                     )
                 }
-                refresh()
-            } catch (e: Exception) {
-                _state.update { it.copy(statusMessage = "Delete failed: ${e.message}") }
+                // Prefer reloading only the selected project when possible.
+                val projectPath = (_state.value.selection as? BrowseSelection.Project)?.path
+                if (projectPath != null) {
+                    invalidateAndReloadProject(projectPath)
+                } else {
+                    refresh()
+                }
+            } catch (_: Exception) {
+                // Ignore; user can retry via refresh.
             }
         }
     }
@@ -298,7 +401,7 @@ class InventoryViewModel(
     ) {
         val req = _state.value.createDialog ?: return
         viewModelScope.launch {
-            _state.update { it.copy(createDialog = null, statusMessage = null) }
+            _state.update { it.copy(createDialog = null) }
             try {
                 val path =
                     when (req.kind) {
@@ -317,7 +420,12 @@ class InventoryViewModel(
                                 content = "",
                             )
                     }
-                refresh()
+                if (req.projectPath != null) {
+                    invalidateAndReloadProject(req.projectPath)
+                } else {
+                    // System skill/memory: reload system lists without waiting on projects.
+                    reloadSystemOnly()
+                }
                 openFile(
                     path = path,
                     title = name.trim().ifBlank { path },
@@ -330,11 +438,55 @@ class InventoryViewModel(
                     canDelete = true,
                     isSkill = req.kind == CreateKind.Skill,
                 )
-                _state.update { it.copy(statusMessage = "Created $name") }
-            } catch (e: Exception) {
-                _state.update { it.copy(statusMessage = "Create failed: ${e.message}") }
+            } catch (_: Exception) {
+                // Ignore; user can retry.
             }
         }
+    }
+
+    private suspend fun reloadSystemOnly() {
+        try {
+            val system = repository.loadSystemSnapshot()
+            _state.update { current ->
+                val snap = current.snapshot
+                current.copy(
+                    snapshot =
+                    system.copy(
+                        projects = snap?.projects.orEmpty(),
+                        unlinkedMemories = snap?.unlinkedMemories.orEmpty(),
+                        warnings = (system.warnings + snap?.warnings.orEmpty()).distinct(),
+                    ),
+                )
+            }
+        } catch (_: Exception) {
+            // Ignore; caller continues with existing snapshot.
+        }
+    }
+
+    private suspend fun invalidateAndReloadProject(projectPath: String) {
+        _state.update { current ->
+            val snap = current.snapshot ?: return@update current
+            current.copy(
+                snapshot =
+                snap.copy(
+                    projects =
+                    snap.projects.map { p ->
+                        if (p.path == projectPath) {
+                            p.copy(
+                                detailsLoaded = false,
+                                skills = emptyList(),
+                                memories = emptyList(),
+                            )
+                        } else {
+                            p
+                        }
+                    },
+                ),
+            )
+        }
+        ensureProjectDetailsLoaded(projectPath)
+        // ensureProjectDetailsLoaded launches a job; wait by reloading directly for create/delete
+        projectLoadJob?.join()
     }
 
     fun closePreview() {
@@ -348,10 +500,6 @@ class InventoryViewModel(
         }
     }
 
-    fun clearStatus() {
-        _state.update { it.copy(statusMessage = null) }
-    }
-
     /**
      * Launch Claude / Grok / OpenCode in a new terminal.
      * [projectPath] is used as the shell working directory when non-null.
@@ -361,15 +509,10 @@ class InventoryViewModel(
         projectPath: String? = null,
     ) {
         viewModelScope.launch {
-            _state.update { it.copy(statusMessage = null) }
             try {
                 repository.launchTool(tool, projectPath)
-                val where = projectPath?.let { " in ${it.substringAfterLast('/')}" }.orEmpty()
-                _state.update { it.copy(statusMessage = "Opened ${tool.displayName}$where") }
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(statusMessage = "Open ${tool.displayName} failed: ${e.message}")
-                }
+            } catch (_: Exception) {
+                // Ignore; launch is fire-and-forget.
             }
         }
     }

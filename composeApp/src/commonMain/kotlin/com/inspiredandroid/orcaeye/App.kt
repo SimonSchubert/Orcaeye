@@ -52,7 +52,6 @@ fun App(
                 onRequestDelete = loopsViewModel::requestDelete,
                 onConfirmDelete = loopsViewModel::confirmDelete,
                 onCancelDelete = loopsViewModel::cancelDelete,
-                onClearStatus = loopsViewModel::clearStatus,
             )
         }
 
@@ -81,7 +80,6 @@ fun App(
                 onRequestDeleteFromEditor = viewModel::requestDeleteFromEditor,
                 onCancelDelete = viewModel::cancelDelete,
                 onConfirmDelete = viewModel::confirmDelete,
-                onClearStatus = viewModel::clearStatus,
                 onOpenTool = viewModel::openTool,
                 modifier = Modifier.fillMaxSize(),
             )

@@ -293,7 +293,11 @@ object SampleData {
             ),
         )
 
-    /** Pinned so the rendered "Next run" line is identical on every machine. */
+    /**
+     * Pinned wall-clock + next-run instants so relative "Next run in …" labels stay
+     * identical on every machine (e.g. 20:00 from 18:00 → "in 2 hours").
+     */
+    private val loopsNow = LocalDateTime(2026, 8, 1, 18, 0)
     private val nextRuns =
         mapOf(
             "orcaeye:a41f7c02" to LocalDateTime(2026, 8, 1, 20, 0),
@@ -306,6 +310,7 @@ object SampleData {
             loading = false,
             snapshot = loopSnapshot,
             nextRuns = nextRuns,
+            now = loopsNow,
         )
 
     /** Same screen with the create/edit dialog open. */

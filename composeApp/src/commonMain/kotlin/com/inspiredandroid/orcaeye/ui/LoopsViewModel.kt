@@ -23,11 +23,12 @@ import kotlin.time.Clock
 data class LoopsUiState(
     val loading: Boolean = true,
     val snapshot: LoopSnapshot? = null,
-    val statusMessage: String? = null,
     val editor: LoopEditorState? = null,
     val deleteConfirm: LoopJob? = null,
     /** Next firing time per enabled job id, computed on load so the UI stays a pure render. */
     val nextRuns: Map<String, LocalDateTime> = emptyMap(),
+    /** Wall-clock used when formatting relative "next run in …" labels. */
+    val now: LocalDateTime? = null,
 ) {
     val jobs: List<LoopJob> get() = snapshot?.scheduled.orEmpty()
     val externalJobs: List<LoopJob> get() = snapshot?.external.orEmpty()
@@ -71,7 +72,6 @@ class LoopsActions(
     val onRequestDelete: (LoopJob) -> Unit = {},
     val onConfirmDelete: () -> Unit = {},
     val onCancelDelete: () -> Unit = {},
-    val onClearStatus: () -> Unit = {},
 )
 
 class LoopsViewModel(
@@ -90,13 +90,8 @@ class LoopsViewModel(
             _state.update { it.copy(loading = true) }
             try {
                 refreshNow()
-            } catch (e: Exception) {
-                _state.update {
-                    it.copy(
-                        loading = false,
-                        statusMessage = "Could not read the crontab: ${e.message}",
-                    )
-                }
+            } catch (_: Exception) {
+                _state.update { it.copy(loading = false) }
             }
         }
     }
@@ -183,24 +178,21 @@ class LoopsViewModel(
                 ).asManaged()
 
         _state.update { it.copy(editor = null) }
-        viewModelScope.launch { persist(job, "Saved ${job.name}") }
+        viewModelScope.launch { persist(job) }
     }
 
     fun toggleEnabled(job: LoopJob) {
         if (!job.editable) return
         val updated = job.copy(enabled = !job.enabled).asManaged()
-        viewModelScope.launch {
-            persist(updated, if (updated.enabled) "Enabled ${updated.name}" else "Disabled ${updated.name}")
-        }
+        viewModelScope.launch { persist(updated) }
     }
 
     fun runNow(job: LoopJob) {
         viewModelScope.launch {
             try {
                 repository.runNow(job)
-                _state.update { it.copy(statusMessage = "Running ${job.name}…") }
-            } catch (e: Exception) {
-                _state.update { it.copy(statusMessage = "Run failed: ${e.message}") }
+            } catch (_: Exception) {
+                // Ignore; run is fire-and-forget.
             }
         }
     }
@@ -220,28 +212,19 @@ class LoopsViewModel(
         viewModelScope.launch {
             try {
                 repository.deleteJob(job.id)
-                _state.update { it.copy(statusMessage = "Deleted ${job.name}") }
                 refreshNow()
-            } catch (e: Exception) {
-                _state.update { it.copy(statusMessage = "Delete failed: ${e.message}") }
+            } catch (_: Exception) {
+                // Ignore; user can retry.
             }
         }
     }
 
-    fun clearStatus() {
-        _state.update { it.copy(statusMessage = null) }
-    }
-
-    private suspend fun persist(
-        job: LoopJob,
-        successMessage: String,
-    ) {
+    private suspend fun persist(job: LoopJob) {
         try {
             repository.saveJob(job)
-            _state.update { it.copy(statusMessage = successMessage) }
             refreshNow()
-        } catch (e: Exception) {
-            _state.update { it.copy(statusMessage = "Save failed: ${e.message}") }
+        } catch (_: Exception) {
+            // Ignore; user can retry.
         }
     }
 
@@ -253,7 +236,7 @@ class LoopsViewModel(
                 .filter { it.enabled && it.source != LoopSource.External }
                 .mapNotNull { job -> job.schedule.nextRuns(at, count = 1).firstOrNull()?.let { job.id to it } }
                 .toMap()
-        _state.update { it.copy(loading = false, snapshot = snapshot, nextRuns = nextRuns) }
+        _state.update { it.copy(loading = false, snapshot = snapshot, nextRuns = nextRuns, now = at) }
     }
 
     private fun LoopEditorState.withNextRuns(): LoopEditorState = copy(nextRuns = schedule?.nextRuns(now(), count = 3).orEmpty())

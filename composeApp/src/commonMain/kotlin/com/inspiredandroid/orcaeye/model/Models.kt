@@ -59,6 +59,11 @@ data class ProjectInventory(
     val agentFiles: List<AgentFileItem>,
     val skills: List<SkillItem>,
     val memories: List<MemoryItem>,
+    /**
+     * False for lightweight discovery stubs (path/name/markers only).
+     * True after a full scan of skills, agent files, and memories.
+     */
+    val detailsLoaded: Boolean = true,
 )
 
 data class AppSnapshot(

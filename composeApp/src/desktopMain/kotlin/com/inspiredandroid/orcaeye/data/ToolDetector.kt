@@ -15,14 +15,18 @@ import kotlin.io.path.exists
 class ToolDetector(
     private val home: Path = Path.of(System.getProperty("user.home")),
 ) {
-    fun detectTools(): List<ToolInstall> = listOf(
-        detectClaude(),
-        detectGrok(),
-        detectOpenCode(),
+    /**
+     * @param includeVersions when false, skips spawning each CLI with `--version`
+     * (saves hundreds of ms on cold start; version is unused in the UI today).
+     */
+    fun detectTools(includeVersions: Boolean = true): List<ToolInstall> = listOf(
+        detectClaude(includeVersions),
+        detectGrok(includeVersions),
+        detectOpenCode(includeVersions),
     )
 
     /** Absolute path to [tool]'s binary, falling back to its bare name when not found. */
-    fun binaryFor(tool: ToolKind): String = detectTools()
+    fun binaryFor(tool: ToolKind): String = detectTools(includeVersions = false)
         .firstOrNull { it.kind == tool }
         ?.binaryPath
         ?: findBinary(tool.cliName, knownPathsFor(tool))?.absolutePathString()
@@ -49,7 +53,7 @@ class ToolDetector(
             )
     }
 
-    private fun detectClaude(): ToolInstall {
+    private fun detectClaude(includeVersions: Boolean): ToolInstall {
         val homeDir = home.resolve(".claude")
         val binary = findBinary("claude", knownPathsFor(ToolKind.Claude))
         val exists = homeDir.exists() || binary != null || home.resolve(".claude.json").exists()
@@ -58,11 +62,11 @@ class ToolDetector(
             installed = exists,
             binaryPath = binary?.absolutePathString(),
             homeDir = homeDir.takeIf { it.exists() }?.absolutePathString(),
-            version = binary?.let { runVersion(it, "--version") },
+            version = if (includeVersions) binary?.let { runVersion(it, "--version") } else null,
         )
     }
 
-    private fun detectGrok(): ToolInstall {
+    private fun detectGrok(includeVersions: Boolean): ToolInstall {
         val homeDir = home.resolve(".grok")
         val binary = findBinary("grok", knownPathsFor(ToolKind.Grok))
         val exists = homeDir.exists() || binary != null
@@ -71,11 +75,11 @@ class ToolDetector(
             installed = exists,
             binaryPath = binary?.absolutePathString(),
             homeDir = homeDir.takeIf { it.exists() }?.absolutePathString(),
-            version = binary?.let { runVersion(it, "--version") },
+            version = if (includeVersions) binary?.let { runVersion(it, "--version") } else null,
         )
     }
 
-    private fun detectOpenCode(): ToolInstall {
+    private fun detectOpenCode(includeVersions: Boolean): ToolInstall {
         val homeDir = home.resolve(".opencode")
         val configDir = home.resolve(".config/opencode")
         val binary = findBinary("opencode", knownPathsFor(ToolKind.OpenCode))
@@ -90,7 +94,7 @@ class ToolDetector(
                 configDir.exists() -> configDir.absolutePathString()
                 else -> null
             },
-            version = binary?.let { runVersion(it, "--version") },
+            version = if (includeVersions) binary?.let { runVersion(it, "--version") } else null,
         )
     }
 

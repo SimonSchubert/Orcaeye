@@ -48,6 +48,7 @@ import com.inspiredandroid.orcaeye.model.SkillItem
 import com.inspiredandroid.orcaeye.model.ToolKind
 import com.inspiredandroid.orcaeye.ui.icons.ToolIcon
 import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.daysUntil
 
 /**
  * Scheduled agent-CLI runs, backed by the user's crontab.
@@ -72,9 +73,7 @@ internal fun LoopsScreen(
                     title = "Loops",
                     subtitle = loopsSubtitle(state),
                     loading = state.loading,
-                    statusMessage = state.statusMessage,
                     onRefresh = actions.onRefresh,
-                    onClearStatus = actions.onClearStatus,
                     actions = {
                         TextButton(
                             onClick = actions.onCreate,
@@ -131,7 +130,7 @@ internal fun LoopsScreen(
             }
 
             items(state.jobs, key = { it.id }) { job ->
-                JobCard(job = job, nextRun = state.nextRuns[job.id], actions = actions)
+                JobCard(job = job, nextRun = state.nextRuns[job.id], now = state.now, actions = actions)
             }
 
             if (state.externalJobs.isNotEmpty()) {
@@ -196,6 +195,7 @@ private fun plural(count: Int) = if (count == 1) "" else "s"
 private fun JobCard(
     job: LoopJob,
     nextRun: LocalDateTime?,
+    now: LocalDateTime?,
     actions: LoopsActions,
 ) {
     CompactCard {
@@ -245,7 +245,11 @@ private fun JobCard(
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            if (!job.enabled) "Disabled" else nextRun?.let { "Next run ${formatRun(it)}" } ?: job.schedule.expression,
+            if (!job.enabled) {
+                "Disabled"
+            } else {
+                nextRunLabel(nextRun, now) ?: job.schedule.expression
+            },
             style = MaterialTheme.typography.labelSmall,
             color =
             if (job.enabled) {
@@ -564,6 +568,48 @@ internal fun describe(schedule: CronSchedule?): String {
 
 internal fun formatRun(value: LocalDateTime): String = "${weekdayName(value.dayOfWeek.ordinal.plus(1) % 7)} ${two(value.day)} ${monthName(value.month.ordinal + 1)} " +
     time(value.hour, value.minute)
+
+/** Relative label for a job card, e.g. "Next run in 2 hours". */
+internal fun nextRunLabel(
+    nextRun: LocalDateTime?,
+    now: LocalDateTime?,
+): String? {
+    if (nextRun == null || now == null) return null
+    return "Next run in ${formatRunIn(nextRun, from = now)}"
+}
+
+/**
+ * Human-readable duration until [value], e.g. "2 hours", "5 minutes", "1 day".
+ * Floors to the largest unit under the next threshold (minutes < 1h, hours < 1d, else days).
+ */
+internal fun formatRunIn(
+    value: LocalDateTime,
+    from: LocalDateTime,
+): String {
+    val totalMinutes = minutesBetween(from, value)
+    if (totalMinutes <= 0) return "less than a minute"
+    return when {
+        totalMinutes < 60 -> unitLabel(totalMinutes.toInt(), "minute")
+        totalMinutes < 60 * 24 -> unitLabel((totalMinutes / 60).toInt(), "hour")
+        else -> unitLabel((totalMinutes / (60 * 24)).toInt(), "day")
+    }
+}
+
+private fun unitLabel(
+    count: Int,
+    unit: String,
+) = if (count == 1) "1 $unit" else "$count ${unit}s"
+
+/** Whole minutes from [from] to [to] using local wall time (cron is minute-resolution). */
+internal fun minutesBetween(
+    from: LocalDateTime,
+    to: LocalDateTime,
+): Long {
+    val days = from.date.daysUntil(to.date)
+    val fromMins = from.hour * 60L + from.minute
+    val toMins = to.hour * 60L + to.minute
+    return days * 24L * 60 + (toMins - fromMins)
+}
 
 private fun time(
     hour: Int,
