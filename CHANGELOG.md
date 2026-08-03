@@ -1,10 +1,10 @@
-## Unreleased
+## v0.3.0 - 2026-08-03
 
 ### Features
 - Browse, create and edit project and system rules (`.claude/rules`, `.grok/rules`, `.cursor/rules`, `.agent/rules`)
 - List Cursor's legacy `.cursorrules` alongside the other agent root files
 
-## v0.2.0 — 2026-08-02
+## v0.2.0 - 2026-08-02
 
 ### Features
 - Add support for Codex, Cursor and Gemini CLI agents
@@ -15,7 +15,7 @@
 - Polish UI
 - Move Homebrew publishing to the dedicated tap
 
-## v0.1.0 — 2026-08-01
+## v0.1.0 - 2026-08-01
 
 ### Features
 - First release: browse and edit skills, memories, agent files and config for Claude, Grok and OpenCode
