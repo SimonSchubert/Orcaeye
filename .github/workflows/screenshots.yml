@@ -41,4 +41,16 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Auto-fix: spotlessApply and updateScreenshots [skip ci]"
-          git push
+          # Release tags (and other pushes) often land while screenshots render.
+          # Rebase + retry so we don't fail the job on a non-fast-forward.
+          BRANCH="${GITHUB_REF_NAME}"
+          for attempt in 1 2 3 4 5; do
+            if git pull --rebase origin "$BRANCH" && git push origin "HEAD:$BRANCH"; then
+              echo "Pushed screenshot updates"
+              exit 0
+            fi
+            echo "Push attempt $attempt failed; retrying..."
+            sleep $((attempt * 3))
+          done
+          echo "::error::Failed to push screenshot updates after retries"
+          exit 1

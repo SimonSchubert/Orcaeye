@@ -19,6 +19,12 @@ tasks.withType<Test>().configureEach {
     systemProperty("java.awt.headless", "true")
     systemProperty("screenshot.output.dir", screenshotsDir.get().asFile.absolutePath)
     maxHeapSize = "2g"
+    // PNGs are written as a side effect of the test; declare them so Gradle does
+    // not treat a cache hit as "done" with an empty build/screenshots folder.
+    outputs.dir(screenshotsDir)
+    // Always re-render: screenshots are the deliverable, not a pure unit result.
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
 }
 
 /** Renders the app screens and refreshes the PNGs committed under media/. */
