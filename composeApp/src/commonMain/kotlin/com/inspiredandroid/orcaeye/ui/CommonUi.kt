@@ -1,9 +1,11 @@
 package com.inspiredandroid.orcaeye.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -12,11 +14,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,33 +88,41 @@ internal fun SectionCard(
     subtitle: String,
     tool: ToolKind? = null,
     onTitleClick: (() -> Unit)? = null,
+    trailing: @Composable () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
     PlainCard {
         Row(
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier =
-            if (onTitleClick != null) {
-                Modifier
-                    .fillMaxWidth()
-                    .hoverClickable(onClick = onTitleClick)
-                    .padding(vertical = 2.dp)
-            } else {
-                Modifier
-            },
         ) {
-            if (tool != null) {
-                ToolIcon(tool = tool, size = 22.dp)
+            // Only the title itself opens the tool, so [trailing] stays independently clickable.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier =
+                if (onTitleClick != null) {
+                    Modifier
+                        .hoverClickable(onClick = onTitleClick)
+                        .padding(vertical = 2.dp)
+                } else {
+                    Modifier
+                },
+            ) {
+                if (tool != null) {
+                    ToolIcon(tool = tool, size = 22.dp)
+                }
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                if (onTitleClick != null) {
+                    Text(
+                        "Open",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            if (onTitleClick != null) {
-                Text(
-                    "Open",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
+            Spacer(Modifier.weight(1f))
+            trailing()
         }
         if (subtitle.isNotBlank()) {
             Text(
@@ -153,25 +169,39 @@ private fun CardShell(
     }
 }
 
+/**
+ * Create affordance for a scope (a tool, or a project). Empty sections are hidden, so the
+ * per-section "Add" buttons would disappear along with them — this keeps one entry point
+ * that is visible whether or not the scope already holds anything.
+ */
 @Composable
-internal fun SectionHeaderWithAdd(
-    title: String,
-    onAdd: () -> Unit,
+internal fun AddMenu(
+    options: List<Pair<String, () -> Unit>>,
+    label: String = "New",
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.weight(1f),
-        )
+    if (options.isEmpty()) return
+    var expanded by remember { mutableStateOf(false) }
+    Box {
         TextButton(
-            onClick = onAdd,
+            onClick = { expanded = true },
             modifier = Modifier.hoverHand(),
         ) {
-            Text("Add")
+            Text(label)
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            options.forEach { (text, onSelect) ->
+                DropdownMenuItem(
+                    text = { Text(text) },
+                    onClick = {
+                        expanded = false
+                        onSelect()
+                    },
+                    modifier = Modifier.hoverHand(),
+                )
+            }
         }
     }
 }

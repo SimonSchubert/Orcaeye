@@ -8,6 +8,7 @@ import com.inspiredandroid.orcaeye.model.LoopSnapshot
 import com.inspiredandroid.orcaeye.model.LoopSource
 import com.inspiredandroid.orcaeye.model.MemoryItem
 import com.inspiredandroid.orcaeye.model.ProjectInventory
+import com.inspiredandroid.orcaeye.model.RuleItem
 import com.inspiredandroid.orcaeye.model.SchedulePreset
 import com.inspiredandroid.orcaeye.model.SkillItem
 import com.inspiredandroid.orcaeye.model.SkillOrigin
@@ -126,6 +127,28 @@ object SampleData {
             ),
         )
 
+    private val systemRules =
+        listOf(
+            RuleItem(
+                name = "code-style",
+                path = "$HOME/.claude/rules/code-style.md",
+                tool = ToolKind.Claude,
+                description = "Formatting and naming conventions",
+            ),
+            RuleItem(
+                name = "testing",
+                path = "$HOME/.claude/rules/testing.md",
+                tool = ToolKind.Claude,
+                description = "Write a failing test first",
+            ),
+            RuleItem(
+                name = "review-tone",
+                path = "$HOME/.grok/rules/review-tone.md",
+                tool = ToolKind.Grok,
+                description = "Keep review comments short and concrete",
+            ),
+        )
+
     private val systemAgentFiles =
         listOf(
             AgentFileItem(name = "CLAUDE.md", path = "$HOME/.claude/CLAUDE.md", tool = ToolKind.Claude),
@@ -157,6 +180,16 @@ object SampleData {
                         path = "$HOME/Projects/Orcaeye/.claude/memory/desktop-only-targets.md",
                         tool = ToolKind.Claude,
                         projectPath = "$HOME/Projects/Orcaeye",
+                    ),
+                ),
+                rules =
+                listOf(
+                    RuleItem(
+                        name = "compose-ui",
+                        path = "$HOME/Projects/Orcaeye/.claude/rules/compose-ui.md",
+                        tool = ToolKind.Claude,
+                        description = "Keep composables stateless and preview-friendly",
+                        globs = listOf("composeApp/src/**/ui/*.kt"),
                     ),
                 ),
             ),
@@ -233,6 +266,7 @@ object SampleData {
             systemSkills = systemSkills,
             systemMemories = systemMemories,
             systemAgentFiles = systemAgentFiles,
+            systemRules = systemRules,
             projects = projects,
         )
 

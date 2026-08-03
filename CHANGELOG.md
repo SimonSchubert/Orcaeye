@@ -1,3 +1,9 @@
+## Unreleased
+
+### Features
+- Browse, create and edit project and system rules (`.claude/rules`, `.grok/rules`, `.cursor/rules`, `.agent/rules`)
+- List Cursor's legacy `.cursorrules` alongside the other agent root files
+
 ## v0.2.0 — 2026-08-02
 
 ### Features

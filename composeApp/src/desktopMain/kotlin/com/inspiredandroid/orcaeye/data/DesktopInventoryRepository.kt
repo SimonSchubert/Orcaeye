@@ -4,6 +4,7 @@ import com.inspiredandroid.orcaeye.model.AgentFileItem
 import com.inspiredandroid.orcaeye.model.AppSnapshot
 import com.inspiredandroid.orcaeye.model.MemoryItem
 import com.inspiredandroid.orcaeye.model.ProjectInventory
+import com.inspiredandroid.orcaeye.model.RuleItem
 import com.inspiredandroid.orcaeye.model.SkillItem
 import com.inspiredandroid.orcaeye.model.SkillOrigin
 import com.inspiredandroid.orcaeye.model.ToolInstall
@@ -83,11 +84,13 @@ class DesktopInventoryRepository(
         val systemSkills = scanSystemSkills(tools)
         val systemMemories = scanSystemMemories(tools)
         val systemAgentFiles = scanSystemAgentFiles(tools)
+        val systemRules = scanSystemRules(tools)
         return AppSnapshot(
             tools = tools,
             systemSkills = systemSkills.sortedWith(skillDisplayOrder),
             systemMemories = systemMemories.sortedBy { it.title.lowercase() },
             systemAgentFiles = systemAgentFiles.sortedBy { it.name.lowercase() },
+            systemRules = systemRules.sortedBy { it.name.lowercase() },
             projects = emptyList(),
             unlinkedMemories = emptyList(),
             warnings = warnings.toList(),
@@ -202,6 +205,48 @@ class DesktopInventoryRepository(
         target.absolutePathString()
     }
 
+    override suspend fun createRule(
+        name: String,
+        tool: ToolKind,
+        projectPath: String?,
+        description: String,
+    ): String = withContext(Dispatchers.IO) {
+        val slug = sanitizeName(name)
+        require(slug.isNotBlank()) { "Rule name is empty" }
+        require(tool.supportsRules) { "${tool.displayName} does not read a rules directory" }
+        val rulesRoot = rulesRootsFor(tool, projectPath).first()
+        // Cursor reads .mdc; everyone else takes plain markdown.
+        val extension = if (tool == ToolKind.Cursor) "mdc" else "md"
+        val target = rulesRoot.resolve("$slug.$extension")
+        if (target.exists()) {
+            error("Rule already exists: ${target.absolutePathString()}")
+        }
+        Files.createDirectories(rulesRoot)
+        val body =
+            buildString {
+                appendLine("---")
+                appendLine("description: ${description.ifBlank { slug }}")
+                if (tool == ToolKind.Cursor) {
+                    // Empty globs + alwaysApply keeps the rule unconditional, matching
+                    // how Claude/Grok treat a rule with no `paths`.
+                    appendLine("globs:")
+                    appendLine("alwaysApply: true")
+                }
+                appendLine("---")
+                appendLine()
+                appendLine("# $name")
+                appendLine()
+                appendLine(
+                    description.ifBlank {
+                        "Instructions the agent should follow in every session."
+                    },
+                )
+                appendLine()
+            }
+        Files.writeString(target, body)
+        target.absolutePathString()
+    }
+
     override suspend fun launchTool(
         tool: ToolKind,
         workingDirectory: String?,
@@ -243,6 +288,35 @@ class DesktopInventoryRepository(
             ToolKind.Codex -> home.resolve(".codex/skills")
             ToolKind.Cursor -> home.resolve(".cursor/skills")
             ToolKind.Gemini -> home.resolve(".gemini/skills")
+        }
+    }
+
+    /**
+     * Directories a tool loads always-on instruction files from, most canonical first
+     * (the first entry is where [createRule] writes).
+     *
+     * Grok additionally reads `.claude/rules` and `.cursor/rules` for compatibility, and
+     * Claude reads `.claude/rules` only — listing a file under the tool that owns the
+     * directory keeps each rule in exactly one place.
+     */
+    private fun rulesRootsFor(
+        tool: ToolKind,
+        projectPath: String?,
+    ): List<Path> {
+        val base = projectPath?.let { Path.of(it) } ?: home
+        return when (tool) {
+            ToolKind.Claude -> listOf(base.resolve(".claude/rules"))
+            ToolKind.Grok -> listOf(base.resolve(".grok/rules"))
+            ToolKind.Cursor -> listOf(base.resolve(".cursor/rules"))
+            ToolKind.Gemini ->
+                if (projectPath != null) {
+                    // Antigravity workspace rules live in .agent/rules.
+                    listOf(base.resolve(".agent/rules"), base.resolve(".gemini/rules"))
+                } else {
+                    listOf(base.resolve(".gemini/rules"), base.resolve(".gemini/antigravity/rules"))
+                }
+            // AGENTS.md-only tools; already surfaced as agent files.
+            ToolKind.OpenCode, ToolKind.Codex -> emptyList()
         }
     }
 
@@ -381,6 +455,13 @@ class DesktopInventoryRepository(
         return result
     }
 
+    private fun scanSystemRules(tools: List<ToolInstall>): List<RuleItem> = ToolKind.entries
+        .filter { kind ->
+            kind.supportsRules && tools.any { it.kind == kind && it.installed }
+        }.flatMap { kind ->
+            rulesRootsFor(kind, projectPath = null).flatMap { listRulesIn(it, kind) }
+        }.distinctBy { it.path }
+
     private fun scanSystemAgentFiles(tools: List<ToolInstall>): List<AgentFileItem> {
         val result = mutableListOf<AgentFileItem>()
         if (tools.any { it.kind == ToolKind.Claude && it.installed }) {
@@ -493,10 +574,13 @@ class DesktopInventoryRepository(
                 .mapNotNull { pathStr -> normalizeExistingDir(pathStr) }
                 .toCollection(LinkedHashSet())
 
-        val claudeMemoryByProject =
-            if (fullDetails) indexClaudeMemoriesByProject() else emptyMap()
-        val grokMemories =
-            if (fullDetails) collectGrokProjectMemories() else emptyList()
+        // Memories live outside the project dir, so both passes need them: they are what
+        // separates a registry-only project from a directory an agent was merely started in
+        // once (a GUI launch or a cron line without `cd` registers `/` that way).
+        val claudeMemoryByProject = indexClaudeMemoriesByProject()
+        val grokMemories = collectGrokProjectMemories()
+        val pathsWithMemories =
+            claudeMemoryByProject.keys + grokMemories.mapNotNull { it.projectPath }
 
         val projects =
             normalized.mapNotNull { pathStr ->
@@ -508,28 +592,26 @@ class DesktopInventoryRepository(
                         grokMemories = grokMemories,
                         fullDetails = fullDetails,
                     )
-                // Registry-only paths may have Claude/Grok memories with no local markers.
-                // On the light pass we keep them so the sidebar appears quickly; a full scan
-                // drops empties after memories are attached (same filter as before).
+                val hasContent =
+                    inv.toolsPresent.isNotEmpty() ||
+                        inv.skills.isNotEmpty() ||
+                        inv.agentFiles.isNotEmpty() ||
+                        inv.memories.isNotEmpty() ||
+                        pathStr in pathsWithMemories
+                if (!hasContent) return@mapNotNull null
+                // The light pass skips memory attachment, so registry membership is all the
+                // sidebar has to show a tool chip with.
                 val fromRegistry =
                     pathStr in claudeNormalized || pathStr in grokNormalized
-                val enriched =
-                    if (!fullDetails && fromRegistry) {
-                        val tools =
-                            inv.toolsPresent.toMutableSet().apply {
-                                if (pathStr in claudeNormalized) add(ToolKind.Claude)
-                                if (pathStr in grokNormalized) add(ToolKind.Grok)
-                            }
-                        inv.copy(toolsPresent = tools)
-                    } else {
-                        inv
-                    }
-                enriched.takeIf {
-                    it.toolsPresent.isNotEmpty() ||
-                        it.skills.isNotEmpty() ||
-                        it.agentFiles.isNotEmpty() ||
-                        it.memories.isNotEmpty() ||
-                        (!fullDetails && fromRegistry)
+                if (!fullDetails && fromRegistry) {
+                    val tools =
+                        inv.toolsPresent.toMutableSet().apply {
+                            if (pathStr in claudeNormalized) add(ToolKind.Claude)
+                            if (pathStr in grokNormalized) add(ToolKind.Grok)
+                        }
+                    inv.copy(toolsPresent = tools)
+                } else {
+                    inv
                 }
             }
         return projects
@@ -540,10 +622,14 @@ class DesktopInventoryRepository(
         if (!path.exists() || !path.isDirectory()) return null
         // Skip home and other non-project roots that show up in Claude/Grok registries
         val abs = path.toAbsolutePath().normalize()
+        // Filesystem root ("/" or "C:\"): registered whenever a CLI runs with no real cwd,
+        // and its Path has no file name, which would render as a nameless sidebar row.
+        if (abs.parent == null) return null
         if (abs == home.normalize() || abs == home.toAbsolutePath().normalize()) return null
-        if (abs.name.equals("Projects", ignoreCase = true) && abs.parent == home.toAbsolutePath().normalize()) {
-            return null
-        }
+        val isScanRoot =
+            PROJECT_SCAN_ROOTS.any { abs.name.equals(it, ignoreCase = true) } &&
+                abs.parent == home.toAbsolutePath().normalize()
+        if (isScanRoot) return null
         return try {
             abs.toRealPath().absolutePathString()
         } catch (_: Exception) {
@@ -567,6 +653,7 @@ class DesktopInventoryRepository(
         val skills = mutableListOf<SkillItem>()
         val agentFiles = mutableListOf<AgentFileItem>()
         val memories = mutableListOf<MemoryItem>()
+        val rules = mutableListOf<RuleItem>()
 
         val claudeDir = projectPath.resolve(".claude")
         if (claudeDir.exists()) {
@@ -616,6 +703,20 @@ class DesktopInventoryRepository(
             }
         }
 
+        if (fullDetails) {
+            // Rules dirs sit inside the tool folders above, plus Antigravity's .agent/rules.
+            ToolKind.entries.filter { it.supportsRules }.forEach { kind ->
+                val found =
+                    rulesRootsFor(kind, abs)
+                        .flatMap { listRulesIn(it, kind) }
+                        .distinctBy { it.path }
+                if (found.isNotEmpty()) {
+                    rules += found
+                    toolsPresent += kind
+                }
+            }
+        }
+
         // Agent root files are cheap existence checks; include even on light scan.
         listOf(
             "CLAUDE.md" to ToolKind.Claude,
@@ -623,6 +724,8 @@ class DesktopInventoryRepository(
             "opencode.json" to ToolKind.OpenCode,
             ".opencode.json" to ToolKind.OpenCode,
             "GEMINI.md" to ToolKind.Gemini,
+            // Cursor's pre-.cursor/rules format: a single root file, not a rules dir.
+            ".cursorrules" to ToolKind.Cursor,
         ).forEach { (fileName, tool) ->
             val f = projectPath.resolve(fileName)
             if (f.exists() && f.isRegularFile()) {
@@ -657,6 +760,7 @@ class DesktopInventoryRepository(
                     when {
                         mem.projectPath == abs -> true
                         mem.projectPath != null -> false
+                        nameKey.isEmpty() -> false // an empty name prefix would match every memory
                         else -> {
                             val title = mem.title.lowercase()
                             val compact = nameKey.replace(" ", "").replace("_", "")
@@ -684,6 +788,7 @@ class DesktopInventoryRepository(
             agentFiles = agentFiles.sortedBy { it.name.lowercase() },
             skills = skills.sortedBy { it.name.lowercase() },
             memories = memories.sortedBy { it.title.lowercase() },
+            rules = rules.sortedBy { it.name.lowercase() },
             detailsLoaded = fullDetails,
         )
     }
@@ -832,11 +937,9 @@ class DesktopInventoryRepository(
 
     private fun discoverFromProjectsFolder(): List<String> {
         val roots =
-            listOf(
-                home.resolve("Projects"),
-                home.resolve("projects"),
-                home.resolve("Developer"),
-            )
+            PROJECT_SCAN_ROOTS
+                .flatMap { listOf(home.resolve(it), home.resolve(it.lowercase())) }
+                .distinct()
         val found = mutableListOf<String>()
         for (root in roots) {
             if (!root.exists() || !root.isDirectory()) continue
@@ -868,6 +971,7 @@ class DesktopInventoryRepository(
                 "CLAUDE.md",
                 "GEMINI.md",
                 "opencode.json",
+                ".cursorrules",
             )
         return markers.any { dir.resolve(it).exists() }
     }
@@ -1018,14 +1122,14 @@ class DesktopInventoryRepository(
                         } catch (_: Exception) {
                             null
                         }
-                    val meta = parseSkillFrontmatter(skillMd)
+                    val meta = parseFrontmatter(skillMd)
                     SkillItem(
-                        name = meta["name"] ?: entry.name,
+                        name = meta.scalar("name") ?: entry.name,
                         path = entry.absolutePathString(),
                         tool = tool,
                         origin = origin,
                         symlinkTarget = symlinkTarget,
-                        description = meta["description"],
+                        description = meta.scalar("description"),
                         skillMdPath = skillMd.absolutePathString(),
                     )
                 }
@@ -1035,34 +1139,118 @@ class DesktopInventoryRepository(
         }
     }
 
-    private fun parseSkillFrontmatter(skillMd: Path): Map<String, String> {
+    /**
+     * Rule files anywhere under [rulesDir]. Claude and Cursor both discover rules
+     * recursively, so a name keeps its subdirectory (`frontend/react`) to stay unique.
+     *
+     * Symlinked rule directories are a documented sharing pattern, so links are followed
+     * with a visited set guarding against cycles.
+     */
+    private fun listRulesIn(
+        rulesDir: Path,
+        tool: ToolKind,
+    ): List<RuleItem> {
+        if (!rulesDir.exists() || !rulesDir.isDirectory()) return emptyList()
+        val result = mutableListOf<RuleItem>()
+        val visited = mutableSetOf<String>()
+
+        fun walk(
+            dir: Path,
+            depth: Int,
+        ) {
+            if (depth > MAX_RULE_DEPTH) return
+            val realDir =
+                try {
+                    dir.toRealPath().absolutePathString()
+                } catch (_: Exception) {
+                    dir.absolutePathString()
+                }
+            if (!visited.add(realDir)) return
+            val entries =
+                try {
+                    dir.listDirectoryEntries()
+                } catch (e: Exception) {
+                    warnings += "Failed listing rules in $dir: ${e.message}"
+                    return
+                }
+            entries.forEach { entry ->
+                if (entry.name.startsWith(".")) return@forEach
+                when {
+                    entry.isDirectory() -> walk(entry, depth + 1)
+                    entry.isRegularFile() && entry.name.substringAfterLast('.', "") in RULE_EXTENSIONS -> {
+                        val meta = parseFrontmatter(entry)
+                        result +=
+                            RuleItem(
+                                name = rulesDir.relativize(entry).toString().substringBeforeLast('.'),
+                                path = entry.absolutePathString(),
+                                tool = tool,
+                                description = meta.scalar("description"),
+                                globs = meta["paths"] ?: meta["globs"] ?: emptyList(),
+                            )
+                    }
+                }
+            }
+        }
+
+        walk(rulesDir, depth = 0)
+        return result
+    }
+
+    /**
+     * Minimal YAML frontmatter reader: scalars become one-element lists, and both inline
+     * (`globs: ["a", "b"]`) and block (`paths:` + `- a`) sequences become multi-element ones.
+     */
+    private fun parseFrontmatter(file: Path): Map<String, List<String>> {
         return try {
-            val lines = skillMd.readText().lineSequence().iterator()
+            val lines = file.readText().lineSequence().iterator()
             if (!lines.hasNext()) return emptyMap()
-            val first = lines.next()
-            if (first.trim() != "---") return emptyMap()
-            val map = mutableMapOf<String, String>()
+            if (lines.next().trim() != "---") return emptyMap()
+            val map = mutableMapOf<String, MutableList<String>>()
+            var currentKey: String? = null
             while (lines.hasNext()) {
                 val line = lines.next()
                 if (line.trim() == "---") break
-                val idx = line.indexOf(':')
-                if (idx > 0) {
-                    val key = line.substring(0, idx).trim()
-                    var value = line.substring(idx + 1).trim()
-                    if (value.startsWith("\"") && value.endsWith("\"") && value.length >= 2) {
-                        value = value.substring(1, value.length - 1)
-                    }
-                    if (value.startsWith("'") && value.endsWith("'") && value.length >= 2) {
-                        value = value.substring(1, value.length - 1)
-                    }
-                    map[key] = value
+                val trimmed = line.trim()
+                if (trimmed.startsWith("- ") || trimmed == "-") {
+                    val key = currentKey ?: continue
+                    val value = unquote(trimmed.removePrefix("-").trim())
+                    if (value.isNotEmpty()) map.getOrPut(key) { mutableListOf() } += value
+                    continue
                 }
+                val idx = line.indexOf(':')
+                if (idx <= 0) continue
+                val key = line.substring(0, idx).trim()
+                currentKey = key
+                val raw = line.substring(idx + 1).trim()
+                val values =
+                    when {
+                        raw.isEmpty() -> emptyList()
+                        raw.startsWith("[") ->
+                            raw
+                                .removePrefix("[")
+                                .removeSuffix("]")
+                                .split(',')
+                                .map { unquote(it.trim()) }
+                                .filter { it.isNotEmpty() }
+                        else -> listOf(unquote(raw))
+                    }
+                map.getOrPut(key) { mutableListOf() } += values
             }
             map
         } catch (_: Exception) {
             emptyMap()
         }
     }
+
+    private fun unquote(value: String): String {
+        if (value.length >= 2) {
+            if (value.startsWith("\"") && value.endsWith("\"")) return value.substring(1, value.length - 1)
+            if (value.startsWith("'") && value.endsWith("'")) return value.substring(1, value.length - 1)
+        }
+        return value
+    }
+
+    private fun Map<String, List<String>>.scalar(key: String): String? = this[key]?.firstOrNull()?.takeIf { it.isNotBlank() }
 
     private fun listMarkdownIn(dir: Path): List<Path> {
         if (!dir.exists() || !dir.isDirectory()) return emptyList()
@@ -1076,6 +1264,15 @@ class DesktopInventoryRepository(
     companion object {
         private const val MAX_PREVIEW_BYTES = 512_000L
         private const val MAX_PREVIEW_CHARS = 200_000
+
+        /** Folders under home that hold projects; the roots themselves are never projects. */
+        private val PROJECT_SCAN_ROOTS = listOf("Projects", "Developer")
+
+        /** `.mdc` is Cursor's rule format; everyone else uses plain markdown. */
+        private val RULE_EXTENSIONS = setOf("md", "mdc")
+
+        /** Rules nest a few levels at most (`rules/frontend/react.mdc`); cap runaway symlinks. */
+        private const val MAX_RULE_DEPTH = 5
 
         /** User before bundled before project, then name. */
         private val skillDisplayOrder =

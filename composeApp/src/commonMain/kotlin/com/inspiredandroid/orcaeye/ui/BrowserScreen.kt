@@ -46,6 +46,7 @@ import com.inspiredandroid.orcaeye.model.CreateRequest
 import com.inspiredandroid.orcaeye.model.FilePreview
 import com.inspiredandroid.orcaeye.model.MemoryItem
 import com.inspiredandroid.orcaeye.model.ProjectInventory
+import com.inspiredandroid.orcaeye.model.RuleItem
 import com.inspiredandroid.orcaeye.model.SkillItem
 import com.inspiredandroid.orcaeye.model.SkillOrigin
 import com.inspiredandroid.orcaeye.model.ToolKind
@@ -288,7 +289,8 @@ private fun Sidebar(
             selected = state.selection is BrowseSelection.System,
             subtitle =
             state.snapshot?.let {
-                "${it.systemSkills.size} skills · ${it.systemMemories.size} memories"
+                "${it.systemSkills.size} skills · ${it.systemMemories.size} memories · " +
+                    "${it.systemRules.size} rules"
             },
             onClick = actions.onSelectSystem,
         )
@@ -441,28 +443,18 @@ private fun SystemContent(
         item {
             DetailToolbar(
                 title = "System",
-                subtitle = "Skills, memories, and config across installed tools",
+                subtitle = "Skills, memories, rules, and config across installed tools",
                 loading = loading,
                 onRefresh = actions.onRefresh,
             )
         }
-        ToolKind.entries.forEach { kind ->
-            val install = snapshot.tools.firstOrNull { it.kind == kind }
-            if (install?.installed != true) {
-                item {
-                    SectionCard(
-                        title = kind.displayName,
-                        subtitle = "Not installed",
-                        tool = kind,
-                    ) {
-                        Text("No home directory or binary found.", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                return@forEach
-            }
+        val installed = ToolKind.entries.filter { kind -> snapshot.tools.any { it.kind == kind && it.installed } }
+        installed.forEach { kind ->
+            val install = snapshot.tools.first { it.kind == kind }
             val skills = snapshot.systemSkills.filter { it.tool == kind }
             val memories = snapshot.systemMemories.filter { it.tool == kind }
             val agents = snapshot.systemAgentFiles.filter { it.tool == kind }
+            val rules = snapshot.systemRules.filter { it.tool == kind }
             val unlinked =
                 if (kind == ToolKind.Grok) {
                     snapshot.unlinkedMemories.filter { it.tool == kind }
@@ -475,22 +467,19 @@ private fun SystemContent(
                     subtitle = install.homeDir.orEmpty(),
                     tool = kind,
                     onTitleClick = { actions.onOpenTool(kind, null) },
+                    trailing = { AddMenu(createOptions(actions, kind, projectPath = null, tools = listOf(kind))) },
                 ) {
-                    // User/Bundled labels are the skills section chrome; Add sits on the User row.
-                    SkillOriginGroups(
-                        skills = skills,
-                        onOpen = actions.onOpenSkill,
-                        onAddUser = { actions.onShowCreate(CreateKind.Skill, null, listOf(kind)) },
-                    )
-                    SectionHeaderWithAdd(
-                        title = "Memories (${memories.size})",
-                        onAdd = {
-                            actions.onShowCreate(CreateKind.Memory, null, listOf(kind))
-                        },
-                    )
-                    if (memories.isEmpty()) {
-                        EmptyHint("No global memories")
-                    } else {
+                    if (skills.isEmpty() &&
+                        memories.isEmpty() &&
+                        unlinked.isEmpty() &&
+                        rules.isEmpty() &&
+                        agents.isEmpty()
+                    ) {
+                        EmptyHint("Nothing set up yet")
+                    }
+                    SkillOriginGroups(skills = skills, onOpen = actions.onOpenSkill)
+                    if (memories.isNotEmpty()) {
+                        SubHeader("Memories (${memories.size})")
                         memories.forEach { mem ->
                             MemoryRow(mem, actions.onOpenMemory)
                         }
@@ -501,10 +490,14 @@ private fun SystemContent(
                             MemoryRow(mem, actions.onOpenMemory)
                         }
                     }
-                    SubHeader("Config / agents (${agents.size})")
-                    if (agents.isEmpty()) {
-                        EmptyHint("None")
-                    } else {
+                    if (rules.isNotEmpty()) {
+                        SubHeader("Rules (${rules.size})")
+                        rules.forEach { rule ->
+                            RuleRow(rule, actions.onOpenRule)
+                        }
+                    }
+                    if (agents.isNotEmpty()) {
+                        SubHeader("Config / agents (${agents.size})")
                         agents.forEach { file ->
                             AgentRow(file, actions.onOpenFile)
                         }
@@ -512,7 +505,28 @@ private fun SystemContent(
                 }
             }
         }
+        // One line rather than a card each: the remaining tools are supported, just absent.
+        val missing = ToolKind.entries - installed.toSet()
+        if (missing.isNotEmpty()) {
+            item {
+                EmptyHint("Not installed: ${missing.joinToString(" · ") { it.displayName }}")
+            }
+        }
     }
+}
+
+/** Create entries offered for a scope; rules are dropped for tools that never read them. */
+private fun createOptions(
+    actions: ContextActions,
+    kind: ToolKind?,
+    projectPath: String?,
+    tools: List<ToolKind>,
+): List<Pair<String, () -> Unit>> = buildList {
+    add("Skill" to { actions.onShowCreate(CreateKind.Skill, projectPath, tools) })
+    if (kind?.supportsRules ?: tools.any { it.supportsRules }) {
+        add("Rule" to { actions.onShowCreate(CreateKind.Rule, projectPath, tools) })
+    }
+    add("Memory" to { actions.onShowCreate(CreateKind.Memory, projectPath, tools) })
 }
 
 @Composable
@@ -540,6 +554,16 @@ private fun ProjectContent(
                 subtitle = project.path,
                 loading = loading,
                 onRefresh = actions.onRefresh,
+                actions = {
+                    AddMenu(
+                        createOptions(
+                            actions = actions,
+                            kind = null,
+                            projectPath = project.path,
+                            tools = toolsForCreate,
+                        ),
+                    )
+                },
             )
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -582,54 +606,52 @@ private fun ProjectContent(
                 }
             }
         }
-        item {
-            SectionCard(title = "Agent files", subtitle = "${project.agentFiles.size}") {
-                if (project.agentFiles.isEmpty()) {
-                    EmptyHint(
-                        if (!project.detailsLoaded) "…" else "No AGENTS.md / CLAUDE.md",
-                    )
-                } else {
+        if (project.agentFiles.isNotEmpty()) {
+            item {
+                PlainCard {
+                    SubHeader("Agent files (${project.agentFiles.size})")
                     project.agentFiles.forEach { AgentRow(it, actions.onOpenFile) }
                 }
             }
         }
-        item {
-            PlainCard {
-                SectionHeaderWithAdd(
-                    title =
-                    if (project.detailsLoaded) {
-                        "Skills (${project.skills.size})"
-                    } else {
-                        "Skills"
-                    },
-                    onAdd = {
-                        actions.onShowCreate(CreateKind.Skill, project.path, toolsForCreate)
-                    },
-                )
-                if (project.skills.isEmpty()) {
-                    EmptyHint(if (!project.detailsLoaded) "…" else "No project skills")
-                } else {
+        if (project.skills.isNotEmpty()) {
+            item {
+                PlainCard {
+                    SubHeader("Skills (${project.skills.size})")
                     project.skills.forEach { SkillRow(it, actions.onOpenSkill) }
                 }
             }
         }
-        item {
-            PlainCard {
-                SectionHeaderWithAdd(
-                    title =
-                    if (project.detailsLoaded) {
-                        "Memories (${project.memories.size})"
-                    } else {
-                        "Memories"
-                    },
-                    onAdd = {
-                        actions.onShowCreate(CreateKind.Memory, project.path, toolsForCreate)
-                    },
-                )
-                if (project.memories.isEmpty()) {
-                    EmptyHint(if (!project.detailsLoaded) "…" else "No project memories found")
-                } else {
+        if (project.rules.isNotEmpty()) {
+            item {
+                PlainCard {
+                    SubHeader("Rules (${project.rules.size})")
+                    project.rules.forEach { RuleRow(it, actions.onOpenRule) }
+                }
+            }
+        }
+        if (project.memories.isNotEmpty()) {
+            item {
+                PlainCard {
+                    SubHeader("Memories (${project.memories.size})")
                     project.memories.forEach { MemoryRow(it, actions.onOpenMemory) }
+                }
+            }
+        }
+        val empty =
+            project.agentFiles.isEmpty() &&
+                project.skills.isEmpty() &&
+                project.rules.isEmpty() &&
+                project.memories.isEmpty()
+        if (empty && project.detailsLoaded && !loading) {
+            item {
+                PlainCard {
+                    Text("Nothing set up yet", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Use New to add a skill, rule or memory for this project.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -637,34 +659,30 @@ private fun ProjectContent(
 }
 
 /**
- * System skills split by origin. Always shows a **User** row (with Add) so tools
- * that only have user skills (Claude, OpenCode) still get a clear section label.
- * **Bundled** appears when present (Grok).
+ * System skills split by origin: **User** for the ones you wrote, **Bundled** for the
+ * copies a CLI ships with (Grok, Cursor). Groups without members are left out.
  */
 @Composable
 private fun SkillOriginGroups(
     skills: List<SkillItem>,
     onOpen: (SkillItem) -> Unit,
-    onAddUser: () -> Unit,
 ) {
     val user = skills.filter { it.origin == SkillOrigin.User }
     val bundled = skills.filter { it.origin == SkillOrigin.Bundled }
     val other = skills.filter { it.origin != SkillOrigin.User && it.origin != SkillOrigin.Bundled }
 
-    SectionHeaderWithAdd(
-        title = "User (${user.size})",
-        onAdd = onAddUser,
-    )
-    if (user.isEmpty() && bundled.isEmpty() && other.isEmpty()) {
-        EmptyHint("No system skills")
-    } else {
+    if (user.isNotEmpty()) {
+        SubHeader("Skills (${user.size})")
         user.forEach { SkillRow(it, onOpen, muted = false) }
     }
     if (bundled.isNotEmpty()) {
-        SubHeader("Bundled (${bundled.size})")
+        SubHeader("Bundled skills (${bundled.size})")
         bundled.forEach { SkillRow(it, onOpen, muted = true) }
     }
-    other.forEach { SkillRow(it, onOpen, muted = false) }
+    if (other.isNotEmpty()) {
+        SubHeader("Other skills (${other.size})")
+        other.forEach { SkillRow(it, onOpen, muted = false) }
+    }
 }
 
 @Composable
@@ -739,6 +757,52 @@ private fun MemoryRow(
         }
         Text(
             memory.path,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun RuleRow(
+    rule: RuleItem,
+    onOpen: (RuleItem) -> Unit,
+) {
+    Column(
+        modifier =
+        Modifier
+            .fillMaxWidth()
+            .hoverClickable(onClick = { onOpen(rule) })
+            .padding(vertical = 6.dp, horizontal = 4.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            ToolIcon(tool = rule.tool, size = 14.dp)
+            Text(rule.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            // A rule with globs only loads for matching files; the rest are on in every session.
+            Badge(if (rule.globs.isEmpty()) "always" else "scoped")
+        }
+        rule.description?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (rule.globs.isNotEmpty()) {
+            Text(
+                rule.globs.joinToString(", "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            rule.path,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -900,7 +964,12 @@ private fun CreateDialog(
     var tool by remember(request) {
         mutableStateOf(request.availableTools.firstOrNull() ?: ToolKind.Grok)
     }
-    val kindLabel = if (request.kind == CreateKind.Skill) "skill" else "memory"
+    val kindLabel =
+        when (request.kind) {
+            CreateKind.Skill -> "skill"
+            CreateKind.Memory -> "memory"
+            CreateKind.Rule -> "rule"
+        }
     val scopeLabel = if (request.projectPath != null) "project" else "system"
 
     AlertDialog(
@@ -929,7 +998,7 @@ private fun CreateDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (request.kind == CreateKind.Skill) {
+                if (request.kind != CreateKind.Memory) {
                     OutlinedTextField(
                         value = description,
                         onValueChange = { description = it },

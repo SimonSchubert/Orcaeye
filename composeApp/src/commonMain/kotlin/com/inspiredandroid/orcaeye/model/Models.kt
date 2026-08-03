@@ -19,6 +19,18 @@ enum class ToolKind {
                 Cursor -> "Cursor"
                 Gemini -> "Gemini"
             }
+
+    /**
+     * Whether the CLI loads a `rules/` directory of always-on instruction files.
+     * OpenCode and Codex only read the AGENTS.md chain, so a rules folder there
+     * would be a file nothing reads.
+     */
+    val supportsRules: Boolean
+        get() =
+            when (this) {
+                Claude, Grok, Cursor, Gemini -> true
+                OpenCode, Codex -> false
+            }
 }
 
 enum class SkillOrigin {
@@ -52,6 +64,23 @@ data class MemoryItem(
     val projectPath: String? = null,
 )
 
+/**
+ * One always-on instruction file from a tool's `rules/` directory
+ * (`.claude/rules`, `.grok/rules`, `.cursor/rules`, `.agent/rules`, …).
+ */
+data class RuleItem(
+    /** Path relative to the rules root, without extension, e.g. `frontend/react`. */
+    val name: String,
+    val path: String,
+    val tool: ToolKind,
+    val description: String? = null,
+    /**
+     * Globs from `paths:` (Claude, Grok) or `globs:` (Cursor) frontmatter.
+     * Empty means the rule is loaded for every session.
+     */
+    val globs: List<String> = emptyList(),
+)
+
 data class AgentFileItem(
     val name: String,
     val path: String,
@@ -65,9 +94,10 @@ data class ProjectInventory(
     val agentFiles: List<AgentFileItem>,
     val skills: List<SkillItem>,
     val memories: List<MemoryItem>,
+    val rules: List<RuleItem> = emptyList(),
     /**
      * False for lightweight discovery stubs (path/name/markers only).
-     * True after a full scan of skills, agent files, and memories.
+     * True after a full scan of skills, agent files, memories, and rules.
      */
     val detailsLoaded: Boolean = true,
 )
@@ -77,6 +107,7 @@ data class AppSnapshot(
     val systemSkills: List<SkillItem>,
     val systemMemories: List<MemoryItem>,
     val systemAgentFiles: List<AgentFileItem>,
+    val systemRules: List<RuleItem> = emptyList(),
     val projects: List<ProjectInventory>,
     val unlinkedMemories: List<MemoryItem> = emptyList(),
     val warnings: List<String> = emptyList(),
@@ -105,6 +136,7 @@ data class FilePreview(
 enum class CreateKind {
     Skill,
     Memory,
+    Rule,
 }
 
 /** Top-level app area: current inventory (Context) vs future Loops. */

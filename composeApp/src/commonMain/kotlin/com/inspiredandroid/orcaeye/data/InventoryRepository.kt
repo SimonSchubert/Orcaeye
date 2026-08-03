@@ -57,6 +57,14 @@ interface InventoryRepository {
         content: String,
     ): String
 
+    /** Creates a file in the tool's `rules/` directory. Returns the new file's path. */
+    suspend fun createRule(
+        name: String,
+        tool: ToolKind,
+        projectPath: String?,
+        description: String,
+    ): String
+
     /**
      * Opens [tool] in a new terminal window.
      * When [workingDirectory] is set (e.g. a project path), the shell cds there first.

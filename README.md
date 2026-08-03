@@ -2,7 +2,7 @@
 
 # Orcaeye
 
-Desktop app to manage the skills and memories your agent CLIs use — system-wide
+Desktop app to manage the skills, memories and rules your agent CLIs use — system-wide
 and per project, alongside their agent files and config — and to set up **Loops**:
 recurring agent runs scheduled through your system's own cron.
 

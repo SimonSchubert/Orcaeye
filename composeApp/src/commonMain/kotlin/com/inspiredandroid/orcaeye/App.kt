@@ -35,6 +35,7 @@ fun App(
                 onSelectProject = viewModel::selectProject,
                 onOpenSkill = viewModel::openSkill,
                 onOpenMemory = viewModel::openMemory,
+                onOpenRule = viewModel::openRule,
                 onOpenFile = { path, title -> viewModel.openFile(path, title) },
                 onDraftChange = viewModel::updateDraft,
                 onSave = viewModel::saveDraft,

@@ -11,6 +11,7 @@ import com.inspiredandroid.orcaeye.model.CreateRequest
 import com.inspiredandroid.orcaeye.model.FilePreview
 import com.inspiredandroid.orcaeye.model.MemoryItem
 import com.inspiredandroid.orcaeye.model.ProjectInventory
+import com.inspiredandroid.orcaeye.model.RuleItem
 import com.inspiredandroid.orcaeye.model.SkillItem
 import com.inspiredandroid.orcaeye.model.SkillOrigin
 import com.inspiredandroid.orcaeye.model.ToolKind
@@ -70,6 +71,7 @@ class ContextActions(
     val onSelectProject: (String) -> Unit = {},
     val onOpenSkill: (SkillItem) -> Unit = {},
     val onOpenMemory: (MemoryItem) -> Unit = {},
+    val onOpenRule: (RuleItem) -> Unit = {},
     val onOpenFile: (path: String, title: String) -> Unit = { _, _ -> },
     val onDraftChange: (String) -> Unit = {},
     val onSave: () -> Unit = {},
@@ -294,6 +296,16 @@ class InventoryViewModel(
         )
     }
 
+    fun openRule(rule: RuleItem) {
+        openFile(
+            path = rule.path,
+            title = rule.name,
+            deletePath = rule.path,
+            canDelete = true,
+            isSkill = false,
+        )
+    }
+
     fun openFile(
         path: String,
         title: String,
@@ -401,7 +413,15 @@ class InventoryViewModel(
         projectPath: String?,
         availableTools: List<ToolKind>,
     ) {
-        val tools = availableTools.ifEmpty { ToolKind.entries }
+        // Offering a rule for a tool that never reads one would write a dead file.
+        val candidates =
+            availableTools
+                .ifEmpty { ToolKind.entries }
+                .filter { kind != CreateKind.Rule || it.supportsRules }
+        val tools =
+            candidates.ifEmpty {
+                ToolKind.entries.filter { kind != CreateKind.Rule || it.supportsRules }
+            }
         _state.update {
             it.copy(
                 createDialog =
@@ -442,6 +462,13 @@ class InventoryViewModel(
                                 tool = tool,
                                 projectPath = req.projectPath,
                                 content = "",
+                            )
+                        CreateKind.Rule ->
+                            repository.createRule(
+                                name = name,
+                                tool = tool,
+                                projectPath = req.projectPath,
+                                description = description,
                             )
                     }
                 if (req.projectPath != null) {
@@ -500,6 +527,7 @@ class InventoryViewModel(
                                 detailsLoaded = false,
                                 skills = emptyList(),
                                 memories = emptyList(),
+                                rules = emptyList(),
                             )
                         } else {
                             p
