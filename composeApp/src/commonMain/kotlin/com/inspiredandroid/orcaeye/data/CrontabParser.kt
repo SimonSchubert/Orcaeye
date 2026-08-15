@@ -27,7 +27,9 @@ object CrontabParser {
     private val MARKER = Regex("""^#\s*orcaeye\s+id=(\S+)(?:\s+name=(.*))?$""")
     private val CD_PREFIX = Regex("""^cd\s+('[^']*'|"[^"]*"|\S+)\s*&&\s*""")
     private val PATH_PREFIX = Regex("""^PATH=('[^']*'|"[^"]*"|\S+)\s+""")
-    private val BINARY = Regex("""^\S*?\b(claude|grok|opencode|codex|cursor-agent|gemini)\s+""")
+
+    /** Built from [ToolKind.cliName] so a new CLI is recognised by adding one enum entry. */
+    private val BINARY = Regex("""^\S*?\b(${ToolKind.entries.joinToString("|") { Regex.escape(it.cliName) }})\s+""")
     private val PROMPT = Regex("""^(?:-p|--print|run|exec)\s+('[^']*'|"[^"]*"|\S+)\s*""")
     private val REDIRECT = Regex("""\s*(?:\d?>>?)\s*('[^']*'|"[^"]*"|\S+)(?:\s*2>&1)?\s*$""")
 
@@ -133,7 +135,7 @@ object CrontabParser {
             append(' ')
         }
         val tool = job.tool ?: ToolKind.Grok
-        append(binaryName(tool))
+        append(tool.cliName)
         append(' ')
         append(promptMode(tool))
         // Codex: `codex exec [flags] 'prompt'` — options must precede the positional prompt.
@@ -173,15 +175,6 @@ object CrontabParser {
         ToolKind.Gemini -> "--yolo"
     }
 
-    fun binaryName(tool: ToolKind): String = when (tool) {
-        ToolKind.Claude -> "claude"
-        ToolKind.Grok -> "grok"
-        ToolKind.OpenCode -> "opencode"
-        ToolKind.Codex -> "codex"
-        ToolKind.Cursor -> "cursor-agent"
-        ToolKind.Gemini -> "gemini"
-    }
-
     /** Subcommand / flag that precedes the prompt for [tool]. */
     fun promptMode(tool: ToolKind): String = when (tool) {
         ToolKind.OpenCode -> "run"
@@ -198,13 +191,6 @@ object CrontabParser {
         val projectSlug = workingDirectory?.trimEnd('/')?.substringAfterLast('/')?.let { slug(it) }
         return if (projectSlug.isNullOrBlank()) promptSlug else "$promptSlug-$projectSlug"
     }
-
-    fun slug(value: String): String = value
-        .trim()
-        .lowercase()
-        .replace(Regex("\\s+"), "-")
-        .replace(Regex("[^a-z0-9._-]+"), "")
-        .trim('-', '.', '_')
 
     // endregion
 
@@ -324,16 +310,7 @@ object CrontabParser {
 
         // Match against "$rest " so a command with no flags after it still ends in whitespace.
         val binaryMatch = BINARY.find("$rest ") ?: return null
-        val tool =
-            when (binaryMatch.groupValues[1]) {
-                "claude" -> ToolKind.Claude
-                "grok" -> ToolKind.Grok
-                "opencode" -> ToolKind.OpenCode
-                "codex" -> ToolKind.Codex
-                "cursor-agent" -> ToolKind.Cursor
-                "gemini" -> ToolKind.Gemini
-                else -> ToolKind.OpenCode
-            }
+        val tool = ToolKind.fromCliName(binaryMatch.groupValues[1]) ?: return null
         rest = rest.drop(binaryMatch.value.length).trim()
 
         val (prompt, extraFlags) =

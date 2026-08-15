@@ -1,6 +1,5 @@
 package com.inspiredandroid.orcaeye.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,8 +17,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -50,7 +47,6 @@ import com.inspiredandroid.orcaeye.model.RuleItem
 import com.inspiredandroid.orcaeye.model.SkillItem
 import com.inspiredandroid.orcaeye.model.SkillOrigin
 import com.inspiredandroid.orcaeye.model.ToolKind
-import com.inspiredandroid.orcaeye.ui.icons.ToolIcon
 
 @Composable
 fun BrowserScreen(
@@ -90,28 +86,11 @@ fun BrowserScreen(
         )
     }
     if (state.deleteConfirmPath != null) {
-        AlertDialog(
-            onDismissRequest = contextActions.onCancelDelete,
-            title = { Text("Delete?") },
-            text = {
-                Text("Delete \"${state.deleteConfirmTitle}\"? This cannot be undone.")
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = contextActions.onConfirmDelete,
-                    modifier = Modifier.hoverHand(),
-                ) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = contextActions.onCancelDelete,
-                    modifier = Modifier.hoverHand(),
-                ) {
-                    Text("Cancel")
-                }
-            },
+        ConfirmDeleteDialog(
+            title = "Delete?",
+            message = "Delete \"${state.deleteConfirmTitle}\"? This cannot be undone.",
+            onConfirm = contextActions.onConfirmDelete,
+            onCancel = contextActions.onCancelDelete,
         )
     }
 }
@@ -186,11 +165,7 @@ private fun ContextBody(
     actions: ContextActions,
 ) {
     when {
-        state.loading && state.snapshot == null -> {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        }
+        state.loading && state.snapshot == null -> LoadingBox(Modifier.fillMaxSize())
         state.error != null && state.snapshot == null -> {
             Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
                 Text("Error: ${state.error}", color = MaterialTheme.colorScheme.error)
@@ -306,13 +281,7 @@ private fun Sidebar(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (state.projectsLoading) {
-                CircularProgressIndicator(
-                    modifier =
-                    Modifier
-                        .height(12.dp)
-                        .width(12.dp),
-                    strokeWidth = 1.5.dp,
-                )
+                InlineSpinner(size = 12.dp, strokeWidth = 1.5.dp)
             }
         }
         ScrollableLazyColumn(modifier = Modifier.weight(1f)) {
@@ -408,10 +377,10 @@ private fun MainPane(
         is BrowseSelection.Project -> {
             val project = state.selectedProject
             if (project == null) {
-                Box(modifier.padding(16.dp), contentAlignment = Alignment.Center) {
-                    if (state.projectsLoading || state.projectDetailsLoading) {
-                        CircularProgressIndicator()
-                    } else {
+                if (state.projectsLoading || state.projectDetailsLoading) {
+                    LoadingBox(modifier.padding(16.dp))
+                } else {
+                    Box(modifier.padding(16.dp), contentAlignment = Alignment.Center) {
                         Text("Project not found")
                     }
                 }
@@ -594,10 +563,7 @@ private fun ProjectContent(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.height(18.dp).width(18.dp),
-                        strokeWidth = 2.dp,
-                    )
+                    InlineSpinner()
                     Text(
                         if (project.detailsLoaded) "Refreshing…" else "Loading project details…",
                         style = MaterialTheme.typography.bodySmall,
@@ -645,14 +611,10 @@ private fun ProjectContent(
                 project.memories.isEmpty()
         if (empty && project.detailsLoaded && !loading) {
             item {
-                PlainCard {
-                    Text("Nothing set up yet", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Use New to add a skill, rule or memory for this project.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                MessageCard(
+                    title = "Nothing set up yet",
+                    message = "Use New to add a skill, rule or memory for this project.",
+                )
             }
         }
     }
@@ -691,52 +653,15 @@ private fun SkillRow(
     onOpen: (SkillItem) -> Unit,
     muted: Boolean = skill.origin == SkillOrigin.Bundled,
 ) {
-    val titleColor =
-        if (muted) {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        } else {
-            MaterialTheme.colorScheme.onSurface
-        }
-    val secondaryColor =
-        if (muted) {
-            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        }
-    Column(
-        modifier =
-        Modifier
-            .fillMaxWidth()
-            .hoverClickable(onClick = { onOpen(skill) })
-            .padding(vertical = 6.dp, horizontal = 4.dp),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            ToolIcon(tool = skill.tool, size = 14.dp)
-            Text(
-                skill.name,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (muted) FontWeight.Normal else FontWeight.Medium,
-                color = titleColor,
-            )
-            OriginBadge(skill.origin)
-        }
-        skill.description?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodySmall,
-                color = secondaryColor,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Text(
-            skill.symlinkTarget?.let { "→ $it" } ?: skill.path,
-            style = MaterialTheme.typography.labelSmall,
-            color = secondaryColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+    ItemRow(
+        title = skill.name,
+        details = listOf(skill.symlinkTarget?.let { "→ $it" } ?: skill.path),
+        tool = skill.tool,
+        description = skill.description,
+        muted = muted,
+        badge = { OriginBadge(skill.origin) },
+        onClick = { onOpen(skill) },
+    )
 }
 
 @Composable
@@ -744,25 +669,12 @@ private fun MemoryRow(
     memory: MemoryItem,
     onOpen: (MemoryItem) -> Unit,
 ) {
-    Column(
-        modifier =
-        Modifier
-            .fillMaxWidth()
-            .hoverClickable(onClick = { onOpen(memory) })
-            .padding(vertical = 6.dp, horizontal = 4.dp),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            ToolIcon(tool = memory.tool, size = 14.dp)
-            Text(memory.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-        }
-        Text(
-            memory.path,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+    ItemRow(
+        title = memory.title,
+        details = listOf(memory.path),
+        tool = memory.tool,
+        onClick = { onOpen(memory) },
+    )
 }
 
 @Composable
@@ -770,45 +682,15 @@ private fun RuleRow(
     rule: RuleItem,
     onOpen: (RuleItem) -> Unit,
 ) {
-    Column(
-        modifier =
-        Modifier
-            .fillMaxWidth()
-            .hoverClickable(onClick = { onOpen(rule) })
-            .padding(vertical = 6.dp, horizontal = 4.dp),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            ToolIcon(tool = rule.tool, size = 14.dp)
-            Text(rule.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-            // A rule with globs only loads for matching files; the rest are on in every session.
-            Badge(if (rule.globs.isEmpty()) "always" else "scoped")
-        }
-        rule.description?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (rule.globs.isNotEmpty()) {
-            Text(
-                rule.globs.joinToString(", "),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Text(
-            rule.path,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+    ItemRow(
+        title = rule.name,
+        details = listOfNotNull(rule.globs.joinToString(", ").takeIf { rule.globs.isNotEmpty() }, rule.path),
+        tool = rule.tool,
+        description = rule.description,
+        // A rule with globs only loads for matching files; the rest are on in every session.
+        badge = { Badge(if (rule.globs.isEmpty()) "always" else "scoped") },
+        onClick = { onOpen(rule) },
+    )
 }
 
 @Composable
@@ -816,25 +698,12 @@ private fun AgentRow(
     file: AgentFileItem,
     onOpenFile: (path: String, title: String) -> Unit,
 ) {
-    Column(
-        modifier =
-        Modifier
-            .fillMaxWidth()
-            .hoverClickable(onClick = { onOpenFile(file.path, file.name) })
-            .padding(vertical = 6.dp, horizontal = 4.dp),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            file.tool?.let { ToolIcon(tool = it, size = 14.dp) }
-            Text(file.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-        }
-        Text(
-            file.path,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+    ItemRow(
+        title = file.name,
+        details = listOf(file.path),
+        tool = file.tool,
+        onClick = { onOpenFile(file.path, file.name) },
+    )
 }
 
 @Composable
@@ -845,26 +714,8 @@ private fun OriginBadge(origin: SkillOrigin) {
             SkillOrigin.Bundled -> "bundled"
             SkillOrigin.Project -> "project"
         }
-    if (origin == SkillOrigin.Bundled) {
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shape = RoundedCornerShape(8.dp),
-            border =
-            BorderStroke(
-                1.dp,
-                MaterialTheme.colorScheme.outlineVariant,
-            ),
-        ) {
-            Text(
-                label,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-            )
-        }
-    } else {
-        Badge(label)
-    }
+    // The copies a CLI ships with sit one step back from the ones the user wrote.
+    Badge(label, outlined = origin == SkillOrigin.Bundled)
 }
 
 @Composable
@@ -935,9 +786,7 @@ private fun EditorPane(
             }
         }
         if (loading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
+            LoadingBox(Modifier.fillMaxSize())
         } else if (preview != null) {
             OutlinedTextField(
                 value = draft,
@@ -977,20 +826,12 @@ private fun CreateDialog(
         title = { Text("New $kindLabel ($scopeLabel)") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("CLI tool", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    request.availableTools.forEach { option ->
-                        FilterChip(
-                            selected = tool == option,
-                            onClick = { tool = option },
-                            label = { Text(option.displayName) },
-                            leadingIcon = {
-                                ToolIcon(tool = option, size = 14.dp)
-                            },
-                            modifier = Modifier.hoverHand(),
-                        )
-                    }
-                }
+                ToolPicker(
+                    label = "CLI tool",
+                    tools = request.availableTools,
+                    selected = tool,
+                    onSelect = { tool = it },
+                )
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },

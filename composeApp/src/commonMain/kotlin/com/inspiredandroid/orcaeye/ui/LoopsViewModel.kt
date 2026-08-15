@@ -4,12 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.inspiredandroid.orcaeye.data.CrontabParser
 import com.inspiredandroid.orcaeye.data.CrontabRepository
+import com.inspiredandroid.orcaeye.data.slug
 import com.inspiredandroid.orcaeye.model.CronSchedule
 import com.inspiredandroid.orcaeye.model.LoopJob
 import com.inspiredandroid.orcaeye.model.LoopSnapshot
 import com.inspiredandroid.orcaeye.model.LoopSource
 import com.inspiredandroid.orcaeye.model.SchedulePreset
 import com.inspiredandroid.orcaeye.model.ToolKind
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,6 +55,34 @@ data class LoopEditorState(
     val expressionValid: Boolean get() = schedule != null
     val isNew: Boolean get() = jobId == null
     val canSave: Boolean get() = expressionValid && prompt.isNotBlank() && name.isNotBlank()
+
+    /**
+     * The job this form describes. [existing] carries over the id and anything the form does
+     * not cover when editing; the command preview passes nothing. Preview and save going
+     * through the same conversion is what stops the preview from showing a command that
+     * differs from the one written to the crontab.
+     */
+    fun toJob(existing: LoopJob? = null): LoopJob {
+        val effectiveSchedule = schedule ?: existing?.schedule ?: CronSchedule.DAILY_9AM
+        val base =
+            existing ?: LoopJob(
+                id = jobId.orEmpty(),
+                name = "",
+                source = LoopSource.Managed,
+                enabled = true,
+                schedule = effectiveSchedule,
+            )
+        return base.copy(
+            name = slug(name),
+            schedule = effectiveSchedule,
+            tool = tool,
+            workingDirectory = projectPath,
+            prompt = prompt.trim(),
+            extraFlags = extraFlags.trim(),
+            pathPrefix = pathPrefix.takeIf { it.isNotBlank() },
+            logPath = logPath.takeIf { it.isNotBlank() },
+        )
+    }
 }
 
 /**
@@ -84,6 +114,29 @@ class LoopsViewModel(
 
     init {
         refresh()
+        startClock()
+    }
+
+    /**
+     * Relative labels ("Next run in 2 hours") render from [LoopsUiState.now], so without a tick
+     * they would stay frozen at whatever the clock read when the crontab was last loaded. Publish
+     * the time on every wall-clock minute — cron's own resolution — and roll a job's next run
+     * forward once its time passes.
+     */
+    private fun startClock() {
+        viewModelScope.launch {
+            while (true) {
+                delay(millisUntilNextMinute(now()))
+                val at = now()
+                _state.update { state ->
+                    val stale = state.nextRuns.values.any { it <= at }
+                    state.copy(
+                        now = at,
+                        nextRuns = if (stale) nextRunsFor(state.snapshot, at) else state.nextRuns,
+                    )
+                }
+            }
+        }
     }
 
     fun refresh() {
@@ -162,40 +215,22 @@ class LoopsViewModel(
 
     fun saveEditor() {
         val editor = _state.value.editor ?: return
-        val schedule = editor.schedule ?: return
+        if (!editor.expressionValid) return
         val existing = _state.value.snapshot?.jobs?.firstOrNull { it.id == editor.jobId }
-
-        val job =
-            (existing ?: LoopJob(id = "", name = "", source = LoopSource.Managed, enabled = true, schedule = schedule))
-                .copy(
-                    name = CrontabParser.slug(editor.name),
-                    schedule = schedule,
-                    tool = editor.tool,
-                    workingDirectory = editor.projectPath,
-                    prompt = editor.prompt.trim(),
-                    extraFlags = editor.extraFlags.trim(),
-                    pathPrefix = editor.pathPrefix.takeIf { it.isNotBlank() },
-                    logPath = editor.logPath.takeIf { it.isNotBlank() },
-                ).asManaged()
+        val job = editor.toJob(existing).asManaged()
 
         _state.update { it.copy(editor = null) }
-        viewModelScope.launch { persist(job) }
+        persist(job)
     }
 
     fun toggleEnabled(job: LoopJob) {
         if (!job.editable) return
         val updated = job.copy(enabled = !job.enabled).asManaged()
-        viewModelScope.launch { persist(updated) }
+        persist(updated)
     }
 
     fun runNow(job: LoopJob) {
-        viewModelScope.launch {
-            try {
-                repository.runNow(job)
-            } catch (_: Exception) {
-                // Ignore; run is fire-and-forget.
-            }
-        }
+        launchIgnoringFailure { repository.runNow(job) }
     }
 
     fun requestDelete(job: LoopJob) {
@@ -210,35 +245,51 @@ class LoopsViewModel(
     fun confirmDelete() {
         val job = _state.value.deleteConfirm ?: return
         _state.update { it.copy(deleteConfirm = null) }
-        viewModelScope.launch {
-            try {
-                repository.deleteJob(job.id)
-                refreshNow()
-            } catch (_: Exception) {
-                // Ignore; user can retry.
-            }
+        launchIgnoringFailure {
+            repository.deleteJob(job.id)
+            refreshNow()
         }
     }
 
-    private suspend fun persist(job: LoopJob) {
-        try {
+    private fun persist(job: LoopJob) {
+        launchIgnoringFailure {
             repository.saveJob(job)
             refreshNow()
-        } catch (_: Exception) {
-            // Ignore; user can retry.
+        }
+    }
+
+    /**
+     * Crontab writes and terminal launches either work or they do not; there is no partial
+     * state to unwind and nowhere to report to, so a failure leaves the list as it was and
+     * Refresh is the way back.
+     */
+    private fun launchIgnoringFailure(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (_: Exception) {
+                // Ignore; the user can retry.
+            }
         }
     }
 
     private suspend fun refreshNow() {
         val snapshot = repository.loadJobs()
         val at = now()
-        val nextRuns =
-            snapshot.jobs
-                .filter { it.enabled && it.source != LoopSource.External }
-                .mapNotNull { job -> job.schedule.nextRuns(at, count = 1).firstOrNull()?.let { job.id to it } }
-                .toMap()
-        _state.update { it.copy(loading = false, snapshot = snapshot, nextRuns = nextRuns, now = at) }
+        _state.update {
+            it.copy(loading = false, snapshot = snapshot, nextRuns = nextRunsFor(snapshot, at), now = at)
+        }
     }
+
+    private fun nextRunsFor(
+        snapshot: LoopSnapshot?,
+        at: LocalDateTime,
+    ): Map<String, LocalDateTime> = snapshot
+        ?.jobs
+        .orEmpty()
+        .filter { it.enabled && it.source != LoopSource.External }
+        .mapNotNull { job -> job.schedule.nextRuns(at, count = 1).firstOrNull()?.let { job.id to it } }
+        .toMap()
 
     private fun LoopEditorState.withNextRuns(): LoopEditorState = copy(nextRuns = schedule?.nextRuns(now(), count = 3).orEmpty())
 
@@ -246,3 +297,6 @@ class LoopsViewModel(
 
     private fun LoopEditorState.withDerivedName(): LoopEditorState = copy(name = derivedName())
 }
+
+/** Time from [at] to the top of the next minute, so ticks land on the boundary instead of drifting. */
+internal fun millisUntilNextMinute(at: LocalDateTime): Long = 60_000L - (at.second * 1_000L + at.nanosecond / 1_000_000L)

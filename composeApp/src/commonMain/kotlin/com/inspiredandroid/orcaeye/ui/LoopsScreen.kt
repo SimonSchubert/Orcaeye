@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -16,10 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -27,7 +22,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -39,6 +33,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.inspiredandroid.orcaeye.data.CrontabParser
+import com.inspiredandroid.orcaeye.data.slug
 import com.inspiredandroid.orcaeye.model.CronSchedule
 import com.inspiredandroid.orcaeye.model.LoopJob
 import com.inspiredandroid.orcaeye.model.LoopSource
@@ -88,14 +83,10 @@ internal fun LoopsScreen(
 
             if (!state.crontabAvailable) {
                 item {
-                    PlainCard {
-                        Text("crontab unavailable", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "Orcaeye could not run `crontab -l`, so scheduling is read-only here.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    MessageCard(
+                        title = "crontab unavailable",
+                        message = "Orcaeye could not run `crontab -l`, so scheduling is read-only here.",
+                    )
                 }
             }
             state.snapshot?.warnings?.forEach { warning ->
@@ -110,22 +101,16 @@ internal fun LoopsScreen(
 
             if (state.loading && state.snapshot == null) {
                 item {
-                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
+                    LoadingBox(Modifier.fillMaxWidth().padding(32.dp))
                 }
             }
 
             if (state.snapshot != null && state.jobs.isEmpty()) {
                 item {
-                    PlainCard {
-                        Text("No scheduled runs yet", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "Add one to run a skill or prompt on a schedule — it lands in your crontab.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    MessageCard(
+                        title = "No scheduled runs yet",
+                        message = "Add one to run a skill or prompt on a schedule — it lands in your crontab.",
+                    )
                 }
             }
 
@@ -157,20 +142,11 @@ internal fun LoopsScreen(
     }
 
     state.deleteConfirm?.let { job ->
-        AlertDialog(
-            onDismissRequest = actions.onCancelDelete,
-            title = { Text("Delete loop?") },
-            text = { Text("Remove \"${job.name}\" from your crontab? This cannot be undone.") },
-            confirmButton = {
-                TextButton(onClick = actions.onConfirmDelete, modifier = Modifier.hoverHand()) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = actions.onCancelDelete, modifier = Modifier.hoverHand()) {
-                    Text("Cancel")
-                }
-            },
+        ConfirmDeleteDialog(
+            title = "Delete loop?",
+            message = "Remove \"${job.name}\" from your crontab? This cannot be undone.",
+            onConfirm = actions.onConfirmDelete,
+            onCancel = actions.onCancelDelete,
         )
     }
 }
@@ -330,18 +306,12 @@ private fun LoopEditorDialog(
                 modifier = Modifier.widthIn(min = 420.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("CLI", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    tools.forEach { option ->
-                        FilterChip(
-                            selected = editor.tool == option,
-                            onClick = { onChange(editor.copy(tool = option)) },
-                            label = { Text(option.displayName) },
-                            leadingIcon = { ToolIcon(tool = option, size = 14.dp) },
-                            modifier = Modifier.hoverHand(),
-                        )
-                    }
-                }
+                ToolPicker(
+                    label = "CLI",
+                    tools = tools,
+                    selected = editor.tool,
+                    onSelect = { onChange(editor.copy(tool = it)) },
+                )
 
                 DropdownField(
                     label = "Project",
@@ -397,7 +367,7 @@ private fun LoopEditorDialog(
 
                 OutlinedTextField(
                     value = editor.name,
-                    onValueChange = { onChange(editor.copy(name = CrontabParser.slug(it))) },
+                    onValueChange = { onChange(editor.copy(name = slug(it))) },
                     label = { Text("Name") },
                     singleLine = true,
                     isError = editor.name.isBlank(),
@@ -490,40 +460,6 @@ private fun ScheduleControls(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-            }
-        }
-    }
-}
-
-@Composable
-private fun <T> DropdownField(
-    label: String,
-    value: String,
-    options: List<Pair<String, T>>,
-    onSelect: (T) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Column {
-        Text(label, style = MaterialTheme.typography.labelMedium)
-        Box {
-            TextButton(onClick = { expanded = true }, modifier = Modifier.hoverHand()) {
-                Text(value, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false },
-                modifier = Modifier.heightIn(max = 320.dp),
-            ) {
-                options.forEach { (text, item) ->
-                    DropdownMenuItem(
-                        text = { Text(text) },
-                        onClick = {
-                            expanded = false
-                            onSelect(item)
-                        },
-                        modifier = Modifier.hoverHand(),
-                    )
-                }
             }
         }
     }
@@ -643,20 +579,6 @@ private fun monthName(month: Int) = listOf(
     "Dec",
 )[(month - 1).coerceIn(0, 11)]
 
-private fun previewCommand(editor: LoopEditorState): String = CrontabParser.buildCommand(
-    LoopJob(
-        id = "preview",
-        name = editor.name,
-        source = LoopSource.Managed,
-        enabled = true,
-        schedule = editor.schedule ?: CronSchedule.DAILY_9AM,
-        tool = editor.tool,
-        workingDirectory = editor.projectPath,
-        prompt = editor.prompt,
-        extraFlags = editor.extraFlags,
-        pathPrefix = editor.pathPrefix.takeIf { it.isNotBlank() },
-        logPath = editor.logPath.takeIf { it.isNotBlank() },
-    ),
-)
+private fun previewCommand(editor: LoopEditorState): String = CrontabParser.buildCommand(editor.toJob())
 
 // endregion

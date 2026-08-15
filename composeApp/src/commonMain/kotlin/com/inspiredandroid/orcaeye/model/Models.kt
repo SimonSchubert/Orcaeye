@@ -1,36 +1,35 @@
 package com.inspiredandroid.orcaeye.model
 
-enum class ToolKind {
-    Claude,
-    Grok,
-    OpenCode,
-    Codex,
-    Cursor,
-    Gemini,
+/**
+ * The agent CLIs Orcaeye knows about, each declaring its own facts so nothing has to be
+ * kept in step across a stack of `when (tool)` blocks. Where a tool keeps its files on
+ * disk is the one thing that lives elsewhere — see `ToolLayout` on the desktop side.
+ *
+ * @param cliName the binary the CLI installs as, and the name a crontab line is recognised by.
+ * @param supportsRules whether the CLI loads a `rules/` directory of always-on instruction
+ * files. OpenCode and Codex only read the AGENTS.md chain, so a rules folder there would be
+ * a file nothing reads.
+ */
+enum class ToolKind(
+    val cliName: String,
+    val supportsRules: Boolean,
+) {
+    Claude(cliName = "claude", supportsRules = true),
+    Grok(cliName = "grok", supportsRules = true),
+    OpenCode(cliName = "opencode", supportsRules = false),
+    Codex(cliName = "codex", supportsRules = false),
+
+    // "cursor-agent", never the bare "agent": that name collides with other CLIs.
+    Cursor(cliName = "cursor-agent", supportsRules = true),
+    Gemini(cliName = "gemini", supportsRules = true),
     ;
 
-    val displayName: String
-        get() =
-            when (this) {
-                Claude -> "Claude"
-                Grok -> "Grok"
-                OpenCode -> "OpenCode"
-                Codex -> "Codex"
-                Cursor -> "Cursor"
-                Gemini -> "Gemini"
-            }
+    /** The enum names are already the product names, so there is no second list to maintain. */
+    val displayName: String get() = name
 
-    /**
-     * Whether the CLI loads a `rules/` directory of always-on instruction files.
-     * OpenCode and Codex only read the AGENTS.md chain, so a rules folder there
-     * would be a file nothing reads.
-     */
-    val supportsRules: Boolean
-        get() =
-            when (this) {
-                Claude, Grok, Cursor, Gemini -> true
-                OpenCode, Codex -> false
-            }
+    companion object {
+        fun fromCliName(cliName: String): ToolKind? = entries.firstOrNull { it.cliName == cliName }
+    }
 }
 
 enum class SkillOrigin {

@@ -150,21 +150,17 @@ class DesktopInventoryRepository(
         projectPath: String?,
         description: String,
     ): String = withContext(Dispatchers.IO) {
-        val slug = sanitizeName(name)
-        require(slug.isNotBlank()) { "Skill name is empty" }
-        val skillsRoot = skillsDirFor(tool, projectPath)
+        val fileSlug = requireSlug(name, "Skill")
+        val skillsRoot = tool.layout.skillsDir(home, projectPath)
         Files.createDirectories(skillsRoot)
-        val skillDir = skillsRoot.resolve(slug)
-        if (skillDir.exists()) {
-            error("Skill already exists: ${skillDir.absolutePathString()}")
-        }
+        val skillDir = skillsRoot.resolve(fileSlug).requireNew("Skill")
         Files.createDirectories(skillDir)
         val skillMd = skillDir.resolve("SKILL.md")
         val body =
             buildString {
                 appendLine("---")
-                appendLine("name: $slug")
-                appendLine("description: ${description.ifBlank { slug }}")
+                appendLine("name: $fileSlug")
+                appendLine("description: ${description.ifBlank { fileSlug }}")
                 appendLine("---")
                 appendLine()
                 appendLine("# $name")
@@ -182,18 +178,14 @@ class DesktopInventoryRepository(
         projectPath: String?,
         content: String,
     ): String = withContext(Dispatchers.IO) {
-        val slug = sanitizeName(name)
-        require(slug.isNotBlank()) { "Memory name is empty" }
-        val target = memoryFileFor(tool, projectPath, slug)
-        if (target.exists()) {
-            error("Memory already exists: ${target.absolutePathString()}")
-        }
+        val fileSlug = requireSlug(name, "Memory")
+        val target = memoryFileFor(tool, projectPath, fileSlug).requireNew("Memory")
         Files.createDirectories(target.parent)
         val body =
             content.ifBlank {
                 buildString {
                     appendLine("---")
-                    appendLine("name: $slug")
+                    appendLine("name: $fileSlug")
                     appendLine("description: $name")
                     appendLine("---")
                     appendLine()
@@ -211,21 +203,17 @@ class DesktopInventoryRepository(
         projectPath: String?,
         description: String,
     ): String = withContext(Dispatchers.IO) {
-        val slug = sanitizeName(name)
-        require(slug.isNotBlank()) { "Rule name is empty" }
+        val fileSlug = requireSlug(name, "Rule")
         require(tool.supportsRules) { "${tool.displayName} does not read a rules directory" }
-        val rulesRoot = rulesRootsFor(tool, projectPath).first()
+        val rulesRoot = tool.layout.ruleRoots(home, projectPath).first()
         // Cursor reads .mdc; everyone else takes plain markdown.
         val extension = if (tool == ToolKind.Cursor) "mdc" else "md"
-        val target = rulesRoot.resolve("$slug.$extension")
-        if (target.exists()) {
-            error("Rule already exists: ${target.absolutePathString()}")
-        }
+        val target = rulesRoot.resolve("$fileSlug.$extension").requireNew("Rule")
         Files.createDirectories(rulesRoot)
         val body =
             buildString {
                 appendLine("---")
-                appendLine("description: ${description.ifBlank { slug }}")
+                appendLine("description: ${description.ifBlank { fileSlug }}")
                 if (tool == ToolKind.Cursor) {
                     // Empty globs + alwaysApply keeps the rule unconditional, matching
                     // how Claude/Grok treat a rule with no `paths`.
@@ -264,289 +252,95 @@ class DesktopInventoryRepository(
         )
     }
 
-    private fun skillsDirFor(
-        tool: ToolKind,
-        projectPath: String?,
-    ): Path {
-        if (projectPath != null) {
-            val project = Path.of(projectPath)
-            val dir =
-                when (tool) {
-                    ToolKind.Claude -> project.resolve(".claude/skills")
-                    ToolKind.Grok -> project.resolve(".grok/skills")
-                    ToolKind.OpenCode -> project.resolve(".opencode/skills")
-                    ToolKind.Codex -> project.resolve(".agents/skills")
-                    ToolKind.Cursor -> project.resolve(".cursor/skills")
-                    ToolKind.Gemini -> project.resolve(".gemini/skills")
-                }
-            return dir
-        }
-        return when (tool) {
-            ToolKind.Claude -> home.resolve(".claude/skills")
-            ToolKind.Grok -> home.resolve(".grok/skills")
-            ToolKind.OpenCode -> home.resolve(".opencode/skills")
-            ToolKind.Codex -> home.resolve(".codex/skills")
-            ToolKind.Cursor -> home.resolve(".cursor/skills")
-            ToolKind.Gemini -> home.resolve(".gemini/skills")
-        }
-    }
+    /** The file name a create call writes to, rejecting a name that slugs down to nothing. */
+    private fun requireSlug(
+        name: String,
+        kind: String,
+    ): String = slug(name).also { require(it.isNotBlank()) { "$kind name is empty" } }
 
-    /**
-     * Directories a tool loads always-on instruction files from, most canonical first
-     * (the first entry is where [createRule] writes).
-     *
-     * Grok additionally reads `.claude/rules` and `.cursor/rules` for compatibility, and
-     * Claude reads `.claude/rules` only — listing a file under the tool that owns the
-     * directory keeps each rule in exactly one place.
-     */
-    private fun rulesRootsFor(
-        tool: ToolKind,
-        projectPath: String?,
-    ): List<Path> {
-        val base = projectPath?.let { Path.of(it) } ?: home
-        return when (tool) {
-            ToolKind.Claude -> listOf(base.resolve(".claude/rules"))
-            ToolKind.Grok -> listOf(base.resolve(".grok/rules"))
-            ToolKind.Cursor -> listOf(base.resolve(".cursor/rules"))
-            ToolKind.Gemini ->
-                if (projectPath != null) {
-                    // Antigravity workspace rules live in .agent/rules.
-                    listOf(base.resolve(".agent/rules"), base.resolve(".gemini/rules"))
-                } else {
-                    listOf(base.resolve(".gemini/rules"), base.resolve(".gemini/antigravity/rules"))
-                }
-            // AGENTS.md-only tools; already surfaced as agent files.
-            ToolKind.OpenCode, ToolKind.Codex -> emptyList()
-        }
+    /** Creating never clobbers: an existing entry is edited through the editor pane instead. */
+    private fun Path.requireNew(kind: String): Path {
+        if (exists()) error("$kind already exists: ${absolutePathString()}")
+        return this
     }
 
     private fun memoryFileFor(
         tool: ToolKind,
         projectPath: String?,
-        slug: String,
+        fileSlug: String,
     ): Path {
-        if (projectPath == null) {
-            return when (tool) {
-                ToolKind.Grok -> home.resolve(".grok/memory").resolve("$slug.md")
-                ToolKind.Claude -> home.resolve(".claude/memory").resolve("$slug.md")
-                ToolKind.OpenCode -> home.resolve(".opencode/memory").resolve("$slug.md")
-                ToolKind.Codex -> home.resolve(".codex/memory").resolve("$slug.md")
-                ToolKind.Cursor -> home.resolve(".cursor/memory").resolve("$slug.md")
-                ToolKind.Gemini -> home.resolve(".gemini/memory").resolve("$slug.md")
-            }
-        }
+        val layout = tool.layout
+        val systemFile = home.resolve(layout.systemMemoryDir).resolve("$fileSlug.md")
+        if (projectPath == null) return systemFile
         val project = Path.of(projectPath)
+        layout.projectMemoryDir?.let { return project.resolve(it).resolve("$fileSlug.md") }
+        // Claude and Grok keep project memories under home, keyed by path and by name slug.
         return when (tool) {
-            ToolKind.Claude -> {
-                val encoded = project.absolutePathString().replace("/", "-")
-                home.resolve(".claude/projects").resolve(encoded).resolve("memory").resolve("$slug.md")
-            }
-            ToolKind.Grok -> {
-                val base = project.name.lowercase().replace(Regex("[^a-z0-9-]+"), "-")
-                home.resolve(".grok/memory").resolve(base).resolve("$slug.md")
-            }
-            ToolKind.OpenCode -> {
-                project.resolve(".opencode/memory").resolve("$slug.md")
-            }
-            ToolKind.Codex -> {
-                project.resolve(".agents/memory").resolve("$slug.md")
-            }
-            ToolKind.Cursor -> {
-                project.resolve(".cursor/memory").resolve("$slug.md")
-            }
-            ToolKind.Gemini -> {
-                project.resolve(".gemini/memory").resolve("$slug.md")
-            }
+            ToolKind.Claude ->
+                claudeProjectsDir()
+                    .resolve(encodeClaudeProjectDir(project.absolutePathString()))
+                    .resolve("memory")
+                    .resolve("$fileSlug.md")
+            ToolKind.Grok -> home.resolve(layout.systemMemoryDir).resolve(grokMemorySlug(project)).resolve("$fileSlug.md")
+            else -> systemFile
         }
     }
 
-    private fun sanitizeName(name: String): String = name
-        .trim()
-        .lowercase()
-        .replace(Regex("\\s+"), "-")
-        .replace(Regex("[^a-z0-9._-]+"), "")
-        .trim('-', '.', '_')
+    /** Grok keeps both its global memories and a folder per project under one root. */
+    private fun grokMemoryRoot(): Path = home.resolve(ToolKind.Grok.layout.systemMemoryDir)
 
-    private fun scanSystemSkills(tools: List<ToolInstall>): List<SkillItem> {
-        val result = mutableListOf<SkillItem>()
-        if (tools.any { it.kind == ToolKind.Claude && it.installed }) {
-            result += listSkillsIn(home.resolve(".claude/skills"), ToolKind.Claude, SkillOrigin.User)
-        }
-        if (tools.any { it.kind == ToolKind.Grok && it.installed }) {
-            val user = listSkillsIn(home.resolve(".grok/skills"), ToolKind.Grok, SkillOrigin.User)
-            val bundled = listSkillsIn(home.resolve(".grok/bundled/skills"), ToolKind.Grok, SkillOrigin.Bundled)
-            // Match Grok: a same-named user skill overrides the bundled copy.
-            val userNames = user.map { it.name.lowercase() }.toSet()
-            result += user
-            result += bundled.filter { it.name.lowercase() !in userNames }
-        }
-        if (tools.any { it.kind == ToolKind.OpenCode && it.installed }) {
-            val openCode =
-                listSkillsIn(home.resolve(".opencode/skills"), ToolKind.OpenCode, SkillOrigin.User) +
-                    listSkillsIn(home.resolve(".config/opencode/skills"), ToolKind.OpenCode, SkillOrigin.User)
-            // Two roots can both hold user skills; keep first occurrence of each name.
-            result += openCode.distinctBy { it.name.lowercase() }
-        }
-        if (tools.any { it.kind == ToolKind.Codex && it.installed }) {
-            result += listSkillsIn(home.resolve(".codex/skills"), ToolKind.Codex, SkillOrigin.User)
-        }
-        if (tools.any { it.kind == ToolKind.Cursor && it.installed }) {
-            val user = listSkillsIn(home.resolve(".cursor/skills"), ToolKind.Cursor, SkillOrigin.User)
-            val bundled = listSkillsIn(home.resolve(".cursor/skills-cursor"), ToolKind.Cursor, SkillOrigin.Bundled)
-            val userNames = user.map { it.name.lowercase() }.toSet()
-            result += user
-            result += bundled.filter { it.name.lowercase() !in userNames }
-        }
-        if (tools.any { it.kind == ToolKind.Gemini && it.installed }) {
-            val gemini =
-                listSkillsIn(home.resolve(".gemini/skills"), ToolKind.Gemini, SkillOrigin.User) +
-                    listSkillsIn(home.resolve(".gemini/antigravity/skills"), ToolKind.Gemini, SkillOrigin.User)
-            result += gemini.distinctBy { it.name.lowercase() }
-        }
-        return result
+    /** Grok's per-project memory folder name: the directory name, hyphenated. */
+    private fun grokMemorySlug(project: Path): String = project.name.lowercase().replace(Regex("[^a-z0-9-]+"), "-")
+
+    /** The tools worth scanning: reported as installed, in [ToolKind] declaration order. */
+    private fun installedKinds(tools: List<ToolInstall>): List<ToolKind> = ToolKind.entries.filter { kind ->
+        tools.any { it.kind == kind && it.installed }
     }
 
-    private fun scanSystemMemories(tools: List<ToolInstall>): List<MemoryItem> {
-        val result = mutableListOf<MemoryItem>()
-        fun addMdFiles(
-            dir: Path,
-            tool: ToolKind,
-        ) {
-            if (!dir.exists() || !dir.isDirectory()) return
-            try {
-                dir.listDirectoryEntries().forEach { entry ->
-                    if (entry.isRegularFile() && entry.name.endsWith(".md")) {
-                        result +=
-                            MemoryItem(
-                                title =
-                                if (entry.name.equals("MEMORY.md", ignoreCase = true)) {
-                                    "Global MEMORY"
-                                } else {
-                                    entry.nameWithoutExtension
-                                },
-                                path = entry.absolutePathString(),
-                                tool = tool,
-                                projectPath = null,
-                            )
-                    }
-                }
-            } catch (_: Exception) {
-                // skip
-            }
-        }
-        if (tools.any { it.kind == ToolKind.Grok && it.installed }) {
-            addMdFiles(home.resolve(".grok/memory"), ToolKind.Grok)
-        }
-        if (tools.any { it.kind == ToolKind.Claude && it.installed }) {
-            addMdFiles(home.resolve(".claude/memory"), ToolKind.Claude)
-        }
-        if (tools.any { it.kind == ToolKind.OpenCode && it.installed }) {
-            addMdFiles(home.resolve(".opencode/memory"), ToolKind.OpenCode)
-        }
-        if (tools.any { it.kind == ToolKind.Codex && it.installed }) {
-            addMdFiles(home.resolve(".codex/memory"), ToolKind.Codex)
-        }
-        if (tools.any { it.kind == ToolKind.Cursor && it.installed }) {
-            addMdFiles(home.resolve(".cursor/memory"), ToolKind.Cursor)
-        }
-        if (tools.any { it.kind == ToolKind.Gemini && it.installed }) {
-            addMdFiles(home.resolve(".gemini/memory"), ToolKind.Gemini)
-        }
-        return result
+    private fun scanSystemSkills(tools: List<ToolInstall>): List<SkillItem> = installedKinds(tools).flatMap { kind ->
+        val roots = kind.layout.systemSkillRoots
+        fun skillsFrom(origin: SkillOrigin) = roots
+            .filter { it.origin == origin }
+            .flatMap { listSkillsIn(home.resolve(it.dir), kind, origin) }
+        // Several roots can hold user skills; keep the first occurrence of each name.
+        val user = skillsFrom(SkillOrigin.User).distinctBy { it.name.lowercase() }
+        val userNames = user.map { it.name.lowercase() }.toSet()
+        // Match the CLIs: a same-named user skill overrides the copy they ship with.
+        user + skillsFrom(SkillOrigin.Bundled).filter { it.name.lowercase() !in userNames }
     }
 
-    private fun scanSystemRules(tools: List<ToolInstall>): List<RuleItem> = ToolKind.entries
-        .filter { kind ->
-            kind.supportsRules && tools.any { it.kind == kind && it.installed }
-        }.flatMap { kind ->
-            rulesRootsFor(kind, projectPath = null).flatMap { listRulesIn(it, kind) }
+    private fun scanSystemMemories(tools: List<ToolInstall>): List<MemoryItem> = installedKinds(tools).flatMap { kind ->
+        listMarkdownIn(home.resolve(kind.layout.systemMemoryDir)).map { md ->
+            MemoryItem(
+                title = if (md.name.equals("MEMORY.md", ignoreCase = true)) "Global MEMORY" else md.nameWithoutExtension,
+                path = md.absolutePathString(),
+                tool = kind,
+                projectPath = null,
+            )
+        }
+    }
+
+    private fun scanSystemRules(tools: List<ToolInstall>): List<RuleItem> = installedKinds(tools)
+        .flatMap { kind ->
+            kind.layout.ruleRoots(home, projectPath = null).flatMap { listRulesIn(it, kind) }
         }.distinctBy { it.path }
 
-    private fun scanSystemAgentFiles(tools: List<ToolInstall>): List<AgentFileItem> {
-        val result = mutableListOf<AgentFileItem>()
-        if (tools.any { it.kind == ToolKind.Claude && it.installed }) {
-            val settings = home.resolve(".claude/settings.json")
-            if (settings.exists()) {
-                result +=
-                    AgentFileItem(
-                        name = "settings.json",
-                        path = settings.absolutePathString(),
-                        tool = ToolKind.Claude,
-                    )
+    private fun scanSystemAgentFiles(tools: List<ToolInstall>): List<AgentFileItem> = installedKinds(tools).flatMap { kind ->
+        val layout = kind.layout
+        val config =
+            layout.configFiles
+                .map { home.resolve(it) }
+                .firstOrNull { it.exists() }
+                ?.let { AgentFileItem(name = it.name, path = it.absolutePathString(), tool = kind) }
+        val bundledAgents =
+            layout.bundledAgentsDir?.let { listMarkdownIn(home.resolve(it)) }.orEmpty().map { md ->
+                AgentFileItem(
+                    name = "agent: ${md.nameWithoutExtension}",
+                    path = md.absolutePathString(),
+                    tool = kind,
+                )
             }
-        }
-        if (tools.any { it.kind == ToolKind.Grok && it.installed }) {
-            val config = home.resolve(".grok/config.toml")
-            if (config.exists()) {
-                result +=
-                    AgentFileItem(
-                        name = "config.toml",
-                        path = config.absolutePathString(),
-                        tool = ToolKind.Grok,
-                    )
-            }
-            listMarkdownIn(home.resolve(".grok/bundled/agents")).forEach { path ->
-                result +=
-                    AgentFileItem(
-                        name = "agent: ${path.nameWithoutExtension}",
-                        path = path.absolutePathString(),
-                        tool = ToolKind.Grok,
-                    )
-            }
-        }
-        if (tools.any { it.kind == ToolKind.OpenCode && it.installed }) {
-            listOf(
-                home.resolve(".config/opencode/opencode.json"),
-                home.resolve(".config/opencode/opencode.jsonc"),
-            ).firstOrNull { it.exists() }?.let { cfg ->
-                result +=
-                    AgentFileItem(
-                        name = cfg.name,
-                        path = cfg.absolutePathString(),
-                        tool = ToolKind.OpenCode,
-                    )
-            }
-        }
-        if (tools.any { it.kind == ToolKind.Codex && it.installed }) {
-            listOf(
-                home.resolve(".codex/config.toml"),
-                home.resolve(".codex/config.json"),
-            ).firstOrNull { it.exists() }?.let { cfg ->
-                result +=
-                    AgentFileItem(
-                        name = cfg.name,
-                        path = cfg.absolutePathString(),
-                        tool = ToolKind.Codex,
-                    )
-            }
-        }
-        if (tools.any { it.kind == ToolKind.Cursor && it.installed }) {
-            listOf(
-                home.resolve(".cursor/cli-config.json"),
-                home.resolve(".cursor/argv.json"),
-            ).firstOrNull { it.exists() }?.let { cfg ->
-                result +=
-                    AgentFileItem(
-                        name = cfg.name,
-                        path = cfg.absolutePathString(),
-                        tool = ToolKind.Cursor,
-                    )
-            }
-        }
-        if (tools.any { it.kind == ToolKind.Gemini && it.installed }) {
-            listOf(
-                home.resolve(".gemini/settings.json"),
-                home.resolve(".gemini/config.json"),
-            ).firstOrNull { it.exists() }?.let { cfg ->
-                result +=
-                    AgentFileItem(
-                        name = cfg.name,
-                        path = cfg.absolutePathString(),
-                        tool = ToolKind.Gemini,
-                    )
-            }
-        }
-        return result
+        listOfNotNull(config) + bundledAgents
     }
 
     /**
@@ -655,87 +449,37 @@ class DesktopInventoryRepository(
         val memories = mutableListOf<MemoryItem>()
         val rules = mutableListOf<RuleItem>()
 
-        val claudeDir = projectPath.resolve(".claude")
-        if (claudeDir.exists()) {
-            toolsPresent += ToolKind.Claude
-            if (fullDetails) {
-                skills += listSkillsIn(claudeDir.resolve("skills"), ToolKind.Claude, SkillOrigin.Project)
+        ToolKind.entries.forEach { kind ->
+            val layout = kind.layout
+            if (layout.projectMarkerDirs.any { projectPath.resolve(it).exists() }) {
+                toolsPresent += kind
+                if (fullDetails) {
+                    layout.projectSkillDirs.forEach { dir ->
+                        skills += listSkillsIn(projectPath.resolve(dir), kind, SkillOrigin.Project)
+                    }
+                }
             }
-        }
-        val grokDir = projectPath.resolve(".grok")
-        if (grokDir.exists()) {
-            toolsPresent += ToolKind.Grok
-            if (fullDetails) {
-                skills += listSkillsIn(grokDir.resolve("skills"), ToolKind.Grok, SkillOrigin.Project)
-            }
-        }
-        val opencodeDir = projectPath.resolve(".opencode")
-        if (opencodeDir.exists()) {
-            toolsPresent += ToolKind.OpenCode
-            if (fullDetails) {
-                skills += listSkillsIn(opencodeDir.resolve("skills"), ToolKind.OpenCode, SkillOrigin.Project)
-            }
-        }
-        val codexDir = projectPath.resolve(".codex")
-        val agentsDir = projectPath.resolve(".agents")
-        if (codexDir.exists() || agentsDir.exists()) {
-            toolsPresent += ToolKind.Codex
-            if (fullDetails) {
-                skills += listSkillsIn(agentsDir.resolve("skills"), ToolKind.Codex, SkillOrigin.Project)
-                skills += listSkillsIn(codexDir.resolve("skills"), ToolKind.Codex, SkillOrigin.Project)
-            }
-        }
-        val cursorDir = projectPath.resolve(".cursor")
-        if (cursorDir.exists()) {
-            toolsPresent += ToolKind.Cursor
-            if (fullDetails) {
-                skills += listSkillsIn(cursorDir.resolve("skills"), ToolKind.Cursor, SkillOrigin.Project)
-            }
-        }
-        val geminiDir = projectPath.resolve(".gemini")
-        val agentDir = projectPath.resolve(".agent")
-        if (geminiDir.exists() || agentDir.exists()) {
-            toolsPresent += ToolKind.Gemini
-            if (fullDetails) {
-                skills += listSkillsIn(geminiDir.resolve("skills"), ToolKind.Gemini, SkillOrigin.Project)
-                // Antigravity project skills
-                skills += listSkillsIn(agentDir.resolve("skills"), ToolKind.Gemini, SkillOrigin.Project)
-            }
-        }
 
-        if (fullDetails) {
-            // Rules dirs sit inside the tool folders above, plus Antigravity's .agent/rules.
-            ToolKind.entries.filter { it.supportsRules }.forEach { kind ->
+            // Agent root files are cheap existence checks; include them even on a light scan.
+            layout.projectAgentFiles.forEach { fileName ->
+                val file = projectPath.resolve(fileName)
+                if (file.exists() && file.isRegularFile()) {
+                    toolsPresent += kind
+                    agentFiles += AgentFileItem(name = fileName, path = file.absolutePathString(), tool = kind)
+                }
+            }
+
+            if (fullDetails) {
+                // Rules dirs sit inside the tool folders above, plus Antigravity's .agent/rules.
                 val found =
-                    rulesRootsFor(kind, abs)
+                    layout
+                        .ruleRoots(home, abs)
                         .flatMap { listRulesIn(it, kind) }
                         .distinctBy { it.path }
                 if (found.isNotEmpty()) {
                     rules += found
                     toolsPresent += kind
                 }
-            }
-        }
-
-        // Agent root files are cheap existence checks; include even on light scan.
-        listOf(
-            "CLAUDE.md" to ToolKind.Claude,
-            "AGENTS.md" to ToolKind.Grok,
-            "opencode.json" to ToolKind.OpenCode,
-            ".opencode.json" to ToolKind.OpenCode,
-            "GEMINI.md" to ToolKind.Gemini,
-            // Cursor's pre-.cursor/rules format: a single root file, not a rules dir.
-            ".cursorrules" to ToolKind.Cursor,
-        ).forEach { (fileName, tool) ->
-            val f = projectPath.resolve(fileName)
-            if (f.exists() && f.isRegularFile()) {
-                toolsPresent += tool
-                agentFiles +=
-                    AgentFileItem(
-                        name = fileName,
-                        path = f.absolutePathString(),
-                        tool = tool,
-                    )
             }
         }
 
@@ -863,7 +607,7 @@ class DesktopInventoryRepository(
         .replace("\\n", "\n")
 
     private fun discoverFromClaudeProjectsDirs(): List<String> {
-        val projectsDir = home.resolve(".claude/projects")
+        val projectsDir = claudeProjectsDir()
         if (!projectsDir.exists()) return emptyList()
         // Prefer mapping via claude.json; only decode when path exists after encode reverse
         val fromJson = discoverFromClaudeJson().toSet()
@@ -886,6 +630,9 @@ class DesktopInventoryRepository(
             emptyList()
         }
     }
+
+    /** Claude's per-project sidecar folder: one directory per registered project path. */
+    private fun claudeProjectsDir(): Path = home.resolve(CLAUDE_PROJECTS_DIR)
 
     private fun encodeClaudeProjectDir(absolutePath: String): String = absolutePath.replace("/", "-")
 
@@ -956,28 +703,10 @@ class DesktopInventoryRepository(
         return found
     }
 
-    private fun hasProjectMarkers(dir: Path): Boolean {
-        val markers =
-            listOf(
-                ".claude",
-                ".grok",
-                ".opencode",
-                ".codex",
-                ".agents",
-                ".cursor",
-                ".gemini",
-                ".agent",
-                "AGENTS.md",
-                "CLAUDE.md",
-                "GEMINI.md",
-                "opencode.json",
-                ".cursorrules",
-            )
-        return markers.any { dir.resolve(it).exists() }
-    }
+    private fun hasProjectMarkers(dir: Path): Boolean = ToolLayout.PROJECT_MARKERS.any { dir.resolve(it).exists() }
 
     private fun indexClaudeMemoriesByProject(): Map<String, List<MemoryItem>> {
-        val projectsDir = home.resolve(".claude/projects")
+        val projectsDir = claudeProjectsDir()
         if (!projectsDir.exists()) return emptyMap()
         val jsonPaths = discoverFromClaudeJson()
         val encodeToPath = jsonPaths.associateBy { encodeClaudeProjectDir(it) }
@@ -1013,7 +742,7 @@ class DesktopInventoryRepository(
     }
 
     private fun collectGrokProjectMemories(): List<MemoryItem> {
-        val memoryRoot = home.resolve(".grok/memory")
+        val memoryRoot = grokMemoryRoot()
         if (!memoryRoot.exists()) return emptyList()
         val sessionPathBySlug = guessGrokSlugToProject()
         val items = mutableListOf<MemoryItem>()
@@ -1068,7 +797,7 @@ class DesktopInventoryRepository(
                 .filter { it.exists() }
                 .associateBy { it.name.lowercase() }
 
-        val memoryRoot = home.resolve(".grok/memory")
+        val memoryRoot = grokMemoryRoot()
         if (!memoryRoot.exists()) return emptyMap()
         try {
             memoryRoot.listDirectoryEntries().filter { it.isDirectory() }.forEach { dir ->
@@ -1267,6 +996,9 @@ class DesktopInventoryRepository(
 
         /** Folders under home that hold projects; the roots themselves are never projects. */
         private val PROJECT_SCAN_ROOTS = listOf("Projects", "Developer")
+
+        /** Claude's registry of everywhere it has run, one sidecar directory per project. */
+        private const val CLAUDE_PROJECTS_DIR = ".claude/projects"
 
         /** `.mdc` is Cursor's rule format; everyone else uses plain markdown. */
         private val RULE_EXTENSIONS = setOf("md", "mdc")

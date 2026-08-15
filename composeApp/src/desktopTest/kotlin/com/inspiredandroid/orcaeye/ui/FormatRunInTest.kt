@@ -48,4 +48,12 @@ class FormatRunInTest {
         assertEquals(null, nextRunLabel(null, from))
         assertEquals(null, nextRunLabel(from, null))
     }
+
+    @Test
+    fun tickWaitsForTheNextMinuteBoundary() {
+        assertEquals(60_000L, millisUntilNextMinute(LocalDateTime(2026, 8, 1, 18, 0, 0)))
+        assertEquals(59_000L, millisUntilNextMinute(LocalDateTime(2026, 8, 1, 18, 0, 1)))
+        assertEquals(1_000L, millisUntilNextMinute(LocalDateTime(2026, 8, 1, 18, 0, 59)))
+        assertEquals(1L, millisUntilNextMinute(LocalDateTime(2026, 8, 1, 18, 0, 59, 999_000_000)))
+    }
 }

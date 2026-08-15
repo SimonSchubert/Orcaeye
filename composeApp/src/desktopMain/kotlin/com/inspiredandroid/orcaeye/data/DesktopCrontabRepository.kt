@@ -55,7 +55,7 @@ class DesktopCrontabRepository(
     }
 
     override fun defaultLogPathFor(name: String): String {
-        val slug = CrontabParser.slug(name).ifBlank { "orcaeye-job" }
+        val fileName = slug(name).ifBlank { "orcaeye-job" }
         val os = System.getProperty("os.name").orEmpty().lowercase()
         val dir =
             if (os.contains("mac")) {
@@ -63,7 +63,7 @@ class DesktopCrontabRepository(
             } else {
                 home.resolve(".local/state/orcaeye")
             }
-        return dir.resolve("$slug.log").absolutePathString()
+        return dir.resolve("$fileName.log").absolutePathString()
     }
 
     /**
