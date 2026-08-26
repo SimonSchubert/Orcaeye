@@ -1,3 +1,9 @@
+## v0.4.1 - 2026-08-26
+
+### Improvements
+- Upgrade Compose Multiplatform to 1.12.0
+- Upgrade Gradle to 9.7.1
+
 ## v0.4.0 - 2026-08-15
 
 ### Improvements
